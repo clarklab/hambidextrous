@@ -12,7 +12,9 @@ The tempo speeds up as the session goes on.
 
 ## Play it
 
-Open `index.html` on a phone (or serve the folder with any static host, e.g. GitHub Pages).
+Hosted on Netlify: connect this repo as a new site and deploy. `netlify.toml` already sets the
+publish directory to the repo root with no build command, plus caching and security headers.
+Locally, just open `index.html` (or serve the folder with any static host).
 Tap **Add to Home Screen** for a full-screen app feel. Sound needs a first tap to unlock.
 
 - Use **only the hand the screen tells you to** (the HUD bar and hand icon change colour: 🔵 left, 🩷 right).
