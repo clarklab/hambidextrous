@@ -1,0 +1,11 @@
+{
+  "name": "Hambidextrous",
+  "short_name": "Hambidextrous",
+  "description": "Go HAM with both hands! A kawaii mini-game frenzy where every game is played with your left hand, then your right.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffd6ec",
+  "theme_color": "#ff9ecf",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
