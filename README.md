@@ -3,12 +3,13 @@
 **Go HAM with both hands!**
 
 A chaotic, kawaii, WarioWare-style micro-game frenzy for phones that secretly trains
-ambidexterity. Every mini game is played **twice in a row: once with your LEFT hand,
-once with your RIGHT.** The hand that wins more games is crowned the **CHAMPION HAND**. 👑
+ambidexterity. A session is a **two-half competition**: one hand (picked at random) plays a
+shuffled set of 6 mini games, then it's **HALFTIME**, and the other hand plays the same 6 games
+in the same order trying to beat each score. The finale reveals the results game by game and
+crowns the **CHAMPION HAND**. 👑
 
-A full session is 6 random mini games (12 rounds) and runs in **under 2 minutes**,
-with a metronome ticking under everything and a beat-synced 3‑2‑1 count before each swap.
-The tempo speeds up as the session goes on.
+A full session (12 rounds) runs in **under 2 minutes**, with a metronome ticking under
+everything and a beat-synced 3‑2‑1 count before each game. The tempo speeds up every round.
 
 ## Play it
 
@@ -18,7 +19,7 @@ Locally, just open `index.html` (or serve the folder with any static host).
 Tap **Add to Home Screen** for a full-screen app feel. Sound needs a first tap to unlock.
 
 - Use **only the hand the screen tells you to** (the HUD bar and hand icon change colour: 🔵 left, 🩷 right).
-- Each round lasts 4–6 seconds. Beat the score your other hand got!
+- Each round lasts 4–6 seconds. In the second half, every game card shows the other hand's score to beat.
 
 ## The 10 mini games
 
