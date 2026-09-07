@@ -74,6 +74,7 @@ const INK = '#2b1d2e';
 const PAL = ['#ff8ac2', '#7ed6ff', '#ffd23f', '#9ef29e', '#c79cff', '#ff9d6b'];
 const HAND_COL = { L: '#5fb8ff', R: '#ff7cc0' };
 const HAND_NAME = { L: 'LEFT', R: 'RIGHT' };
+const COUNT_IN = 5;            // beats counted down before every round (5-4-3-2-1-GO)
 const GAMES_PER_SESSION = 6;   // 6 games x 2 hands keeps a session under 2 minutes
 let TOP = 0, BOT = 0, HUD = 104;   // safe-area insets + HUD height (recomputed on resize)
 
@@ -892,10 +893,8 @@ function champAt() { return REVEAL_START + S.results.length * REVEAL_STEP + 0.6;
 function onBeat() {
   S.beat++;
   if (S.state === 'countdown') {
-    if (S.beat === 1) { S.cd = 3; AU.count(3); }
-    else if (S.beat === 2) { S.cd = 2; AU.count(2); }
-    else if (S.beat === 3) { S.cd = 1; AU.count(1); }
-    else if (S.beat >= 4) { AU.count(0); beginPlay(); }
+    if (S.beat <= COUNT_IN) { S.cd = COUNT_IN + 1 - S.beat; AU.count(S.cd); }
+    else { AU.count(0); beginPlay(); }
   } else if (S.state === 'roundEnd') { if (S.beat >= 2) afterRoundEnd(); }
   else if (S.state === 'halftime') { if (S.beat === 2 || S.beat === 4) AU.pop(); else if (S.beat >= 7) beginRound(); }
 }

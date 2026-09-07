@@ -9,7 +9,7 @@ in the same order trying to beat each score. The finale reveals the results game
 crowns the **CHAMPION HAND**. 👑
 
 A full session (12 rounds) runs in **under 2 minutes**, with a metronome ticking under
-everything and a beat-synced 3‑2‑1 count before each game. The tempo speeds up every round.
+everything and a beat-synced 5‑4‑3‑2‑1 count before each game. The tempo speeds up every round.
 
 ## Names & world records
 
