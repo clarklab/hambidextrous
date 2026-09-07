@@ -16,10 +16,32 @@
 <style>
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#ffd6ec;--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);touch-action:none;-webkit-user-select:none;user-select:none;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
   canvas{display:block;width:100%;height:100%;touch-action:none}
+  #namebox{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(43,29,46,0.45);z-index:10;font-family:"Fredoka","Baloo 2","Nunito","Arial Rounded MT Bold","Helvetica Neue",Arial,sans-serif;touch-action:manipulation}
+  #namebox[hidden]{display:none}
+  #namebox .card{background:#fff;border:5px solid #2b1d2e;border-radius:30px;box-shadow:0 8px 0 #2b1d2e;padding:26px 24px 22px;width:min(86vw,340px);text-align:center;animation:pop .35s cubic-bezier(.34,1.56,.64,1)}
+  @keyframes pop{from{transform:scale(.6)}to{transform:scale(1)}}
+  #namebox .hands{font-size:44px;line-height:1;margin-bottom:6px}
+  #namebox h1{margin:0;font-size:22px;color:#ff5c8a;letter-spacing:.5px}
+  #namebox p{margin:6px 0 14px;color:#2b1d2e;font-size:17px}
+  #nameinput{display:block;width:100%;box-sizing:border-box;font:700 22px inherit;text-align:center;padding:12px;border:4px solid #2b1d2e;border-radius:18px;background:#fff8fb;color:#2b1d2e;outline:none;-webkit-user-select:text;user-select:text}
+  #nameinput:focus{border-color:#ff5c8a;background:#fff}
+  #namego{margin-top:14px;width:100%;font:700 22px inherit;color:#fff;background:#ff5c8a;border:4px solid #2b1d2e;border-radius:999px;padding:12px;box-shadow:0 5px 0 #2b1d2e;-webkit-text-stroke:1px #2b1d2e}
+  #namego:active{transform:translateY(3px);box-shadow:0 2px 0 #2b1d2e}
+  #namebox small{display:block;margin-top:10px;color:#2b1d2e;opacity:.6;font-size:12px}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="namebox" hidden>
+  <form class="card" id="nameform" autocomplete="off">
+    <div class="hands">🫲 🫱</div>
+    <h1>HAMBIDEXTROUS</h1>
+    <p>What's your name, champ?</p>
+    <input id="nameinput" maxlength="12" placeholder="your name" autocomplete="off" autocapitalize="words" autocorrect="off" spellcheck="false" enterkeyhint="go" inputmode="text">
+    <button id="namego" type="submit">LET'S GO!</button>
+    <small>Your name goes on the world records board 🌍</small>
+  </form>
+</div>
 <script>
 'use strict';
 /* =====================================================================
@@ -674,12 +696,78 @@ GAMES.push({
 });
 
 /* =====================================================================
+   PLAYER NAME + GLOBAL HIGH SCORES (Netlify DB via /api/scores)
+   Scores go into a persistent outbox (localStorage) the moment a round ends,
+   then flush asynchronously with retry/backoff, sendBeacon on page hide and
+   re-flush on reload. Client-generated ids make every send idempotent, so
+   nothing is ever lost or double counted.
+   ===================================================================== */
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} } };
+const cleanName = v => String(v || '').replace(/[\x00-\x1f\x7f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12);
+const NET = {
+  url: '/api/scores', name: '', board: null, status: 'idle', // idle | loading | synced | saving | offline
+  outbox: [], flushing: false, backoff: 1500, timer: null, pb: {}, sessionRecords: 0,
+  load() {
+    this.name = cleanName(store.get('ham.name', '')); this.outbox = store.get('ham.outbox', []); this.board = store.get('ham.board', null); this.pb = store.get('ham.pb', {});
+    if (!Array.isArray(this.outbox)) this.outbox = [];
+    this.refresh(); this.flush();
+  },
+  setName(n) { this.name = cleanName(n) || 'Champ'; store.set('ham.name', this.name); },
+  setBoard(b) { if (b && b.games) { this.board = { games: b.games, ts: b.ts || Date.now() }; store.set('ham.board', this.board); } },
+  async refresh() {
+    if (this.status === 'idle') this.status = 'loading';
+    try { const r = await fetch(this.url, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); this.setBoard(await r.json()); if (!this.outbox.length) this.status = 'synced'; }
+    catch (_) { if (!this.outbox.length) this.status = 'offline'; }
+  },
+  top(gid) { return (this.board && this.board.games && this.board.games[gid]) || []; },
+  best(gid) { return this.top(gid)[0] || null; },
+  // called at the end of every round; returns { world, personal } flags for the celebration
+  record(game, hand, res) {
+    const prev = this.best(game.id); const world = !!this.board && res.value > 0 && (!prev || res.value > prev.value);
+    const personal = res.value > 0 && res.value > (this.pb[game.id] || 0);
+    if (personal) { this.pb[game.id] = res.value; store.set('ham.pb', this.pb); }
+    if (world) this.sessionRecords++;
+    const entry = { id: uid(), name: this.name || 'Champ', game: game.id, hand, value: res.value, pct: res.pct, at: new Date().toISOString() };
+    this.outbox.push(entry); store.set('ham.outbox', this.outbox);
+    if (this.board && this.board.games) { // optimistic local board so the records screen is instantly right
+      const l = this.board.games[game.id] = this.board.games[game.id] || [];
+      l.push({ name: entry.name, value: entry.value, hand, at: entry.at }); l.sort((a, b) => b.value - a.value || (a.at < b.at ? -1 : 1)); l.length = Math.min(l.length, 10); store.set('ham.board', this.board);
+    }
+    this.flush();
+    return { world, personal };
+  },
+  flush() {
+    if (this.flushing || !this.outbox.length) return; this.flushing = true; this.status = 'saving'; clearTimeout(this.timer);
+    const batch = this.outbox.slice(0, 50);
+    fetch(this.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entries: batch }), keepalive: true })
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(res => {
+        const ok = new Set(Array.isArray(res.accepted) ? res.accepted : batch.map(e => e.id));
+        this.outbox = this.outbox.filter(e => !ok.has(e.id)); store.set('ham.outbox', this.outbox); this.setBoard(res);
+        this.backoff = 1500; this.flushing = false; if (this.outbox.length) this.flush(); else this.status = 'synced';
+      })
+      .catch(() => { this.flushing = false; this.status = 'offline'; this.timer = setTimeout(() => this.flush(), this.backoff); this.backoff = Math.min(60000, this.backoff * 2); });
+  },
+  // last-chance send when the page is hidden/closed; ids keep it idempotent, outbox keeps it safe
+  beacon() { if (!this.outbox.length || !navigator.sendBeacon) return; try { navigator.sendBeacon(this.url, new Blob([JSON.stringify({ entries: this.outbox.slice(0, 50) })], { type: 'text/plain' })); } catch (_) {} },
+  handTally() { let L = 0, R = 0; for (const g of GAMES) { const b = this.best(g.id); if (b) { if (b.hand === 'L') L++; else R++; } } return { L, R }; },
+  statusLabel() { return { idle: '', loading: '🌍 loading records…', synced: '🌍 world records synced', saving: '⏳ saving score…', offline: '📡 offline · will retry' }[this.status] || ''; },
+};
+const nameBox = document.getElementById('namebox'), nameInput = document.getElementById('nameinput');
+function askName(prefill) { nameInput.value = prefill || ''; nameBox.hidden = false; setTimeout(() => { try { nameInput.focus(); } catch (_) {} }, 50); }
+document.getElementById('nameform').addEventListener('submit', e => { e.preventDefault(); NET.setName(nameInput.value); nameBox.hidden = true; nameInput.blur(); AU.init(); AU.great(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) NET.beacon(); else { NET.flush(); if (!NET.outbox.length) NET.refresh(); } });
+window.addEventListener('pagehide', () => NET.beacon());
+window.addEventListener('online', () => { NET.backoff = 1500; NET.flush(); NET.refresh(); });
+
+/* =====================================================================
    SESSION / STATE MACHINE
    ===================================================================== */
 const S = {
   state: 'title', t: 0, beat: 0,
   games: [], gi: 0, half: 0, hand: 'L', firstHand: 'L', game: null,
-  scores: {}, results: [], cd: null, goT: 0, buttons: [], stateT: 0, tally: null, lastRound: null, titleT: 0, revealed: 0, champShown: false,
+  scores: {}, results: [], cd: null, goT: 0, buttons: [], stateT: 0, tally: null, lastRound: null, titleT: 0, revealed: 0, champShown: false, rec: null, rows: [], viewGame: null,
 };
 function setState(s) { S.state = s; S.t = 0; S.beat = 0; }
 function curGame() { return S.games[S.gi]; }
@@ -689,7 +777,7 @@ function bpmFor(ri) { return 130 + ri * 3; }
 
 function startSession(ids) {
   S.games = ids ? ids.map(id => GAMES.find(g => g.id === id)) : shuffle(GAMES).slice(0, GAMES_PER_SESSION);
-  S.startedAt = performance.now();
+  S.startedAt = performance.now(); NET.sessionRecords = 0;
   S.gi = 0; S.half = 0; S.results = []; S.scores = {}; S.tally = null;
   S.firstHand = Math.random() < 0.5 ? 'L' : 'R'; S.hand = S.firstHand; FX.list.length = 0;
   Metro.start(bpmFor(0));
@@ -703,7 +791,8 @@ function rivalScore() { return S.half === 1 ? (S.scores[S.game.id] || {})[otherH
 function beginPlay() { S.game.start(); S.goT = 0.6; setState('play'); }
 function endPlay() {
   const res = S.game.result(); (S.scores[S.game.id] = S.scores[S.game.id] || {})[S.hand] = res; S.lastRound = res; S.game.up({ x: 0, y: 0 }); activeId = null;
-  if (res.pct >= 0.8) AU.great(); else if (res.pct >= 0.4) AU.good(); else AU.bad();
+  S.rec = NET.record(S.game, S.hand, res);   // queue the score for the world board (async, never blocks)
+  if (S.rec.world) { AU.fanfare(); FX.confetti(60); } else if (S.rec.personal) AU.great(); else if (res.pct >= 0.8) AU.great(); else if (res.pct >= 0.4) AU.good(); else AU.bad();
   setState('roundEnd');
 }
 function afterRoundEnd() {
@@ -753,9 +842,19 @@ document.addEventListener('dblclick', e => e.preventDefault());
 
 function hitButton(p) { return S.buttons.find(b => Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2); }
 function onDown(p) {
-  if (S.state === 'title') { if (S.t > 0.4 && hitButton(p)) { AU.great(); startSession(); } }
+  const b = hitButton(p);
+  if (S.state === 'title') {
+    if (S.t < 0.3 || !b) return;
+    if (b.id === 'play') { AU.great(); startSession(); }
+    else if (b.id === 'records') { AU.pop(); NET.refresh(); S.viewGame = null; setState('records'); }
+    else if (b.id === 'name') { AU.pop(); askName(NET.name); }
+  }
   else if (S.state === 'play') S.game.down(p);
-  else if (S.state === 'final') { if (S.champShown && S.t > champAt() + 0.6 && hitButton(p)) { AU.pop(); startSession(); } }
+  else if (S.state === 'final') { if (S.champShown && S.t > champAt() + 0.6 && b) { AU.pop(); if (b.id === 'records') { S.viewGame = null; setState('records'); } else startSession(); } }
+  else if (S.state === 'records') {
+    if (b && b.id === 'back') { AU.pop(); if (S.viewGame) { S.viewGame = null; S.t = 0; } else setState('title'); return; }
+    if (!S.viewGame) { const row = S.rows.find(r => Math.abs(p.y - r.y) < r.h / 2); if (row) { AU.pop(); S.viewGame = row.game; S.t = 0; } }
+  }
 }
 function onMove(p) { if (S.state === 'play') S.game.move(p); }
 function onUp(p) { if (S.state === 'play') S.game.up(p); }
@@ -803,8 +902,8 @@ function drawHandGlow(side, a = 0.5) {
   g.addColorStop(0, HAND_COL[side]); g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
 }
-function bigButton(x, y, w, h, label, col) {
-  S.buttons.push({ x, y, w, h });
+function bigButton(x, y, w, h, label, col, id = label) {
+  S.buttons.push({ x, y, w, h, id });
   const b = 1 + Math.sin(S.titleT * 5) * 0.03; ctx.save(); ctx.translate(x, y); ctx.scale(b, b);
   rr(-w / 2, -h / 2 + 6, w, h, h / 2); ctx.fillStyle = INK; ctx.fill();
   rr(-w / 2, -h / 2, w, h, h / 2); ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
@@ -825,8 +924,47 @@ function drawTitle() {
   txt('VS', cx, H * 0.5, 34, { color: '#ffd23f', stroke: INK, rot: Math.sin(t * 3) * 0.2 });
   txt('One hand plays all the games…', cx, H * 0.66, Math.min(18, W * 0.046), { color: INK, weight: 500 });
   txt('then the other hand gets its turn. Who wins? 👑', cx, H * 0.66 + 26, Math.min(18, W * 0.046), { color: INK, weight: 500 });
-  bigButton(cx, H * 0.8 - BOT * 0.5, Math.min(260, W * 0.7), 74, 'TAP TO PLAY', '#ff5c8a');
-  txt(GAMES.length + ' mini games · under 2 minutes · both hands!', cx, H * 0.8 + 62, 14, { color: INK, weight: 500, alpha: 0.7 });
+  // greeting (tap to change name)
+  const gw = Math.min(W - 60, 300); S.buttons.push({ x: cx, y: H * 0.36, w: gw, h: 40, id: 'name' });
+  rr(cx - gw / 2, H * 0.36 - 20, gw, 40, 20); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+  txt('Hi ' + (NET.name || 'Champ') + '! ✏️', cx, H * 0.36 + 1, 18, { color: INK, weight: 700 });
+  bigButton(cx, H * 0.78 - BOT * 0.5, Math.min(260, W * 0.7), 70, 'TAP TO PLAY', '#ff5c8a', 'play');
+  bigButton(cx, H * 0.88 - BOT * 0.5, Math.min(230, W * 0.62), 50, '🌍 WORLD RECORDS', '#c79cff', 'records');
+  txt(NET.statusLabel(), cx, H * 0.88 + 44 - BOT * 0.5, 13, { color: INK, weight: 500, alpha: 0.6 });
+}
+// ---------- world records screens ----------
+function drawRecords() {
+  drawBackground('#e8f4ff'); S.buttons = []; S.rows = []; const cx = W / 2, k = easeOutBack(S.t / 0.35);
+  if (!S.viewGame) {
+    txt('🌍 WORLD RECORDS', cx, TOP + H * 0.07, Math.min(30, W * 0.075) * k, { color: '#fff', stroke: INK });
+    const tally = NET.handTally();
+    txt(NET.board ? `lefties hold ${tally.L} · righties hold ${tally.R}` : NET.status === 'offline' ? 'offline — connect to see the board' : 'loading the board…', cx, TOP + H * 0.07 + 34, 15, { color: INK, weight: 500, alpha: 0.75 });
+    const lw = Math.min(W - 24, 400), rh = Math.min(50, (H * 0.66) / GAMES.length), ly = TOP + H * 0.14;
+    rr(cx - lw / 2, ly, lw, rh * GAMES.length + 12, 24); ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+    GAMES.forEach((g, i) => {
+      const y = ly + 6 + rh * i + rh / 2, b = NET.best(g.id); S.rows.push({ y, h: rh, game: g });
+      const show = S.t > 0.1 + i * 0.05; if (!show) return;
+      txt(g.emoji, cx - lw / 2 + 26, y, 22); txt(g.name, cx - lw / 2 + 48, y - 8, 14, { align: 'left', color: INK });
+      if (b) { txt(b.name, cx - lw / 2 + 48, y + 10, 13, { align: 'left', color: HAND_COL[b.hand], weight: 500 }); txt(String(b.value), cx + lw / 2 - 58, y, 22, { color: '#ffd23f', stroke: INK, strokeW: 4 }); badge(cx + lw / 2 - 22, y, 26, 22, HAND_COL[b.hand], b.hand, 13); }
+      else txt('no one yet!', cx + lw / 2 - 50, y, 13, { color: INK, weight: 500, alpha: 0.5 });
+    });
+    txt('tap a game for its top 10', cx, ly + rh * GAMES.length + 34, 13, { color: INK, weight: 500, alpha: 0.6 });
+  } else {
+    const g = S.viewGame, list = NET.top(g.id);
+    txt(g.emoji + ' ' + g.name, cx, TOP + H * 0.07, Math.min(28, W * 0.07) * k, { color: '#fff', stroke: INK });
+    txt('best ' + g.unit + ' in the whole world', cx, TOP + H * 0.07 + 32, 14, { color: INK, weight: 500, alpha: 0.7 });
+    const lw = Math.min(W - 24, 400), rh = Math.min(48, (H * 0.6) / 10), ly = TOP + H * 0.14;
+    rr(cx - lw / 2, ly, lw, rh * 10 + 12, 24); ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+    for (let i = 0; i < 10; i++) {
+      const y = ly + 6 + rh * i + rh / 2, e = list[i]; if (S.t < 0.1 + i * 0.05) break;
+      txt(i === 0 ? '👑' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1), cx - lw / 2 + 26, y, i < 3 ? 22 : 15, { color: INK });
+      if (!e) { txt('—', cx, y, 14, { color: INK, alpha: 0.3 }); continue; }
+      txt(e.name, cx - lw / 2 + 50, y, 16, { align: 'left', color: e.name === NET.name ? '#ff5c8a' : INK, weight: 700 });
+      txt(String(e.value), cx + lw / 2 - 58, y, 20, { color: '#ffd23f', stroke: INK, strokeW: 4 }); badge(cx + lw / 2 - 22, y, 26, 22, HAND_COL[e.hand], e.hand, 13);
+    }
+  }
+  bigButton(cx, H * 0.92 - BOT, Math.min(200, W * 0.5), 52, '◀ BACK', '#7ed6ff', 'back');
+  txt(NET.statusLabel(), cx, H * 0.92 - BOT + 40, 12, { color: INK, weight: 500, alpha: 0.6 });
 }
 
 function drawCountdown() {
@@ -867,8 +1005,10 @@ function drawPlay() {
 function drawRoundEnd() {
   const g = S.game; drawBackground(g.bg); ctx.save(); ctx.globalAlpha = 0.5; g.draw(); ctx.restore(); FX.draw(); drawHUD();
   const res = S.lastRound, hc = HAND_COL[S.hand]; const k = easeOutBack(S.t / 0.3);
+  const rec = S.rec || {}, extra = rec.world || rec.personal ? 48 : 0;
   ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(k, k);
-  rr(-Math.min(W - 40, 340) / 2, -90, Math.min(W - 40, 340), 180, 30); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke();
+  rr(-Math.min(W - 40, 340) / 2, -90, Math.min(W - 40, 340), 180 + extra, 30); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke();
+  if (extra) txt(rec.world ? '🌍 NEW WORLD RECORD!' : '⭐ new personal best!', 0, 108, rec.world ? 24 : 20, { color: rec.world ? '#ffd23f' : '#c79cff', stroke: INK, rot: Math.sin(S.titleT * 10) * 0.05 });
   txt(HAND_NAME[S.hand] + ' HAND', 0, -50, 22, { color: hc, stroke: INK });
   txt(res.label, 0, 6, Math.min(44, W * 0.1), { color: '#ffd23f', stroke: INK });
   const rv = rivalScore();
@@ -928,7 +1068,12 @@ function drawFinal() {
     txt(r.winner === 'T' ? '🤝' : '👑', cx + lw / 2 - (r.winner === 'L' ? 140 : r.winner === 'R' ? 60 : 70), y, 16 * rk);
   });
   ctx.restore();
-  if (done) bigButton(cx, H * 0.9 - BOT, Math.min(260, W * 0.7), 66, 'PLAY AGAIN', '#ff5c8a');
+  if (done) {
+    if (NET.sessionRecords) txt(`🌍 ${NET.sessionRecords} NEW WORLD RECORD${NET.sessionRecords > 1 ? 'S' : ''}!`, cx, TOP + H * 0.81, Math.min(22, W * 0.055), { color: '#ffd23f', stroke: INK, rot: Math.sin(S.titleT * 6) * 0.04 });
+    bigButton(cx - Math.min(70, W * 0.18), H * 0.9 - BOT, Math.min(190, W * 0.5), 62, 'PLAY AGAIN', '#ff5c8a', 'again');
+    bigButton(cx + Math.min(120, W * 0.32), H * 0.9 - BOT, Math.min(100, W * 0.26), 62, '🌍', '#c79cff', 'records');
+    txt(NET.statusLabel(), cx, H * 0.9 - BOT + 46, 12, { color: INK, weight: 500, alpha: 0.6 });
+  }
   FX.draw();
 }
 
@@ -941,6 +1086,7 @@ function draw() {
     case 'roundEnd': drawRoundEnd(); break;
     case 'halftime': drawHalftime(); break;
     case 'final': drawFinal(); break;
+    case 'records': drawRecords(); break;
   }
   ctx.restore();
 }
@@ -955,7 +1101,9 @@ function loop(now) {
 requestAnimationFrame(loop);
 if (document.fonts && document.fonts.load) document.fonts.load('700 20px Fredoka').catch(() => {});
 // expose for testing / tinkering
-window.HAM = { S, GAMES, Metro, AU, startSession };
+NET.load();
+if (!NET.name) askName('');
+window.HAM = { S, GAMES, Metro, AU, NET, startSession, askName };
 </script>
 </body>
 </html>

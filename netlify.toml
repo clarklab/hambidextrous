@@ -3,6 +3,16 @@
   publish = "."
   command = ""
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# The scores API must never be cached
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-store"
+
 # Security + caching headers
 [[headers]]
   for = "/*"
