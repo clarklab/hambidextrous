@@ -13,8 +13,10 @@ everything and a beat-synced 3‑2‑1 count before each game. The tempo speeds 
 
 ## Names & world records
 
-The game asks for the player's name up front (kept in `localStorage`, tap **Hi NAME! ✏️** on the
-title screen to change it). Every finished round is sent to a global leaderboard: per game, the
+Tapping **TAP TO PLAY** asks for the player's name before the session starts. The name lives only
+for that game: the finale's **🏠 HOME** button clears it and returns to the title screen, and the
+next **TAP TO PLAY** asks again, so a phone passed around a group always credits the right kid.
+Personal bests are remembered per name on the device. Every finished round is sent to a global leaderboard: per game, the
 top 10 scores in the world, with the hand that set them. A round that beats the world's best
 gets a **🌍 NEW WORLD RECORD!** and beating your own best gets a **⭐ personal best**.
 **🌍 WORLD RECORDS** on the title screen shows the record holder for every game, and tapping a

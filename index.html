@@ -28,6 +28,7 @@
   #namego{margin-top:14px;width:100%;font:700 22px inherit;color:#fff;background:#ff5c8a;border:4px solid #2b1d2e;border-radius:999px;padding:12px;box-shadow:0 5px 0 #2b1d2e;-webkit-text-stroke:1px #2b1d2e}
   #namego:active{transform:translateY(3px);box-shadow:0 2px 0 #2b1d2e}
   #namebox small{display:block;margin-top:10px;color:#2b1d2e;opacity:.6;font-size:12px}
+  #namecancel{margin-top:10px;background:none;border:0;color:#2b1d2e;opacity:.6;font:600 14px inherit;padding:6px 10px}
 </style>
 </head>
 <body>
@@ -40,6 +41,7 @@
     <input id="nameinput" maxlength="12" placeholder="your name" autocomplete="off" autocapitalize="words" autocorrect="off" spellcheck="false" enterkeyhint="go" inputmode="text">
     <button id="namego" type="submit">LET'S GO!</button>
     <small>Your name goes on the world records board 🌍</small>
+    <button id="namecancel" type="button">← back</button>
   </form>
 </div>
 <script>
@@ -709,11 +711,12 @@ const NET = {
   url: '/api/scores', name: '', board: null, status: 'idle', // idle | loading | synced | saving | offline
   outbox: [], flushing: false, backoff: 1500, timer: null, pb: {}, sessionRecords: 0,
   load() {
-    this.name = cleanName(store.get('ham.name', '')); this.outbox = store.get('ham.outbox', []); this.board = store.get('ham.board', null); this.pb = store.get('ham.pb', {});
+    this.name = ''; this.pb = {}; this.outbox = store.get('ham.outbox', []); this.board = store.get('ham.board', null);
     if (!Array.isArray(this.outbox)) this.outbox = [];
     this.refresh(); this.flush();
   },
-  setName(n) { this.name = cleanName(n) || 'Champ'; store.set('ham.name', this.name); },
+  setName(n) { this.name = cleanName(n) || 'Champ'; this.pb = store.get('ham.pb.' + this.name.toLowerCase(), {}); },
+  clearName() { this.name = ''; this.pb = {}; },
   setBoard(b) { if (b && b.games) { this.board = { games: b.games, ts: b.ts || Date.now() }; store.set('ham.board', this.board); } },
   async refresh() {
     if (this.status === 'idle') this.status = 'loading';
@@ -726,7 +729,7 @@ const NET = {
   record(game, hand, res) {
     const prev = this.best(game.id); const world = !!this.board && res.value > 0 && (!prev || res.value > prev.value);
     const personal = res.value > 0 && res.value > (this.pb[game.id] || 0);
-    if (personal) { this.pb[game.id] = res.value; store.set('ham.pb', this.pb); }
+    if (personal) { this.pb[game.id] = res.value; store.set('ham.pb.' + this.name.toLowerCase(), this.pb); }
     if (world) this.sessionRecords++;
     const entry = { id: uid(), name: this.name || 'Champ', game: game.id, hand, value: res.value, pct: res.pct, at: new Date().toISOString() };
     this.outbox.push(entry); store.set('ham.outbox', this.outbox);
@@ -756,7 +759,8 @@ const NET = {
 };
 const nameBox = document.getElementById('namebox'), nameInput = document.getElementById('nameinput');
 function askName(prefill) { nameInput.value = prefill || ''; nameBox.hidden = false; setTimeout(() => { try { nameInput.focus(); } catch (_) {} }, 50); }
-document.getElementById('nameform').addEventListener('submit', e => { e.preventDefault(); NET.setName(nameInput.value); nameBox.hidden = true; nameInput.blur(); AU.init(); AU.great(); });
+document.getElementById('nameform').addEventListener('submit', e => { e.preventDefault(); NET.setName(nameInput.value); nameBox.hidden = true; nameInput.blur(); AU.init(); AU.great(); startSession(); });
+document.getElementById('namecancel').addEventListener('click', () => { nameBox.hidden = true; nameInput.blur(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) NET.beacon(); else { NET.flush(); if (!NET.outbox.length) NET.refresh(); } });
 window.addEventListener('pagehide', () => NET.beacon());
 window.addEventListener('online', () => { NET.backoff = 1500; NET.flush(); NET.refresh(); });
@@ -783,6 +787,7 @@ function startSession(ids) {
   Metro.start(bpmFor(0));
   beginRound();
 }
+function goHome() { NET.clearName(); S.tally = null; S.results = []; FX.list.length = 0; Metro.stop(); setState('title'); }
 function beginRound() {
   S.game = curGame(); S.cd = null; Metro.bpm = bpmFor(roundIndex()); setState('countdown');
 }
@@ -845,14 +850,13 @@ function onDown(p) {
   const b = hitButton(p);
   if (S.state === 'title') {
     if (S.t < 0.3 || !b) return;
-    if (b.id === 'play') { AU.great(); startSession(); }
+    if (b.id === 'play') { AU.pop(); askName(''); }
     else if (b.id === 'records') { AU.pop(); NET.refresh(); S.viewGame = null; setState('records'); }
-    else if (b.id === 'name') { AU.pop(); askName(NET.name); }
   }
   else if (S.state === 'play') S.game.down(p);
-  else if (S.state === 'final') { if (S.champShown && S.t > champAt() + 0.6 && b) { AU.pop(); if (b.id === 'records') { S.viewGame = null; setState('records'); } else startSession(); } }
+  else if (S.state === 'final') { if (S.champShown && S.t > champAt() + 0.6 && b) { AU.pop(); if (b.id === 'records') { S.viewGame = null; setState('records'); } else goHome(); } }
   else if (S.state === 'records') {
-    if (b && b.id === 'back') { AU.pop(); if (S.viewGame) { S.viewGame = null; S.t = 0; } else setState('title'); return; }
+    if (b && b.id === 'back') { AU.pop(); if (S.viewGame) { S.viewGame = null; S.t = 0; } else if (S.tally) goHome(); else setState('title'); return; }
     if (!S.viewGame) { const row = S.rows.find(r => Math.abs(p.y - r.y) < r.h / 2); if (row) { AU.pop(); S.viewGame = row.game; S.t = 0; } }
   }
 }
@@ -924,10 +928,6 @@ function drawTitle() {
   txt('VS', cx, H * 0.5, 34, { color: '#ffd23f', stroke: INK, rot: Math.sin(t * 3) * 0.2 });
   txt('One hand plays all the games…', cx, H * 0.66, Math.min(18, W * 0.046), { color: INK, weight: 500 });
   txt('then the other hand gets its turn. Who wins? 👑', cx, H * 0.66 + 26, Math.min(18, W * 0.046), { color: INK, weight: 500 });
-  // greeting (tap to change name)
-  const gw = Math.min(W - 60, 300); S.buttons.push({ x: cx, y: H * 0.36, w: gw, h: 40, id: 'name' });
-  rr(cx - gw / 2, H * 0.36 - 20, gw, 40, 20); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
-  txt('Hi ' + (NET.name || 'Champ') + '! ✏️', cx, H * 0.36 + 1, 18, { color: INK, weight: 700 });
   bigButton(cx, H * 0.78 - BOT * 0.5, Math.min(260, W * 0.7), 70, 'TAP TO PLAY', '#ff5c8a', 'play');
   bigButton(cx, H * 0.88 - BOT * 0.5, Math.min(230, W * 0.62), 50, '🌍 WORLD RECORDS', '#c79cff', 'records');
   txt(NET.statusLabel(), cx, H * 0.88 + 44 - BOT * 0.5, 13, { color: INK, weight: 500, alpha: 0.6 });
@@ -1048,7 +1048,8 @@ function drawFinal() {
     hand(cx + gap, hy + Math.cos(S.titleT * 12) * 3, hs * 0.85, 'R', 'o', HAND_COL.R, -Math.sin(S.titleT * 14) * 0.05);
     txt('VS', cx, hy, 30, { color: '#ffd23f', stroke: INK });
   } else {
-    txt(t.champ === 'T' ? 'BOTH HANDS WIN!' : 'CHAMPION HAND!', cx, TOP + H * 0.055, Math.min(32, W * 0.078), { color: '#fff', stroke: INK });
+    const head = (NET.name ? NET.name.toUpperCase() + (/S$/i.test(NET.name) ? "' " : "'S ") : '') + (t.champ === 'T' ? 'BOTH HANDS WIN!' : 'CHAMPION HAND!');
+    txt(head, cx, TOP + H * 0.055, Math.min(32, W * 0.078, (W - 30) / head.length * 1.85), { color: '#fff', stroke: INK });
     if (t.champ === 'T') { hand(cx - 70, hy, hs * 0.8 * k, 'L', 'joy', HAND_COL.L, Math.sin(S.titleT * 8) * 0.15); hand(cx + 70, hy, hs * 0.8 * k, 'R', 'joy', HAND_COL.R, -Math.sin(S.titleT * 8) * 0.15); txt('🤝', cx, hy - hs * 1.3, 50); }
     else { hand(cx, hy - bounce, hs * k, t.champ, 'joy', HAND_COL[t.champ], Math.sin(S.titleT * 8) * 0.15); txt('👑', cx, hy - hs * 1.45 - bounce, 56 * k, { rot: Math.sin(S.titleT * 5) * 0.15 }); }
   }
@@ -1070,7 +1071,7 @@ function drawFinal() {
   ctx.restore();
   if (done) {
     if (NET.sessionRecords) txt(`🌍 ${NET.sessionRecords} NEW WORLD RECORD${NET.sessionRecords > 1 ? 'S' : ''}!`, cx, TOP + H * 0.81, Math.min(22, W * 0.055), { color: '#ffd23f', stroke: INK, rot: Math.sin(S.titleT * 6) * 0.04 });
-    bigButton(cx - Math.min(70, W * 0.18), H * 0.9 - BOT, Math.min(190, W * 0.5), 62, 'PLAY AGAIN', '#ff5c8a', 'again');
+    bigButton(cx - Math.min(70, W * 0.18), H * 0.9 - BOT, Math.min(190, W * 0.5), 62, '🏠 HOME', '#ff5c8a', 'home');
     bigButton(cx + Math.min(120, W * 0.32), H * 0.9 - BOT, Math.min(100, W * 0.26), 62, '🌍', '#c79cff', 'records');
     txt(NET.statusLabel(), cx, H * 0.9 - BOT + 46, 12, { color: INK, weight: 500, alpha: 0.6 });
   }
@@ -1102,7 +1103,6 @@ requestAnimationFrame(loop);
 if (document.fonts && document.fonts.load) document.fonts.load('700 20px Fredoka').catch(() => {});
 // expose for testing / tinkering
 NET.load();
-if (!NET.name) askName('');
 window.HAM = { S, GAMES, Metro, AU, NET, startSession, askName };
 </script>
 </body>
