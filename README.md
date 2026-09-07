@@ -45,6 +45,8 @@ Hosted on Netlify: connect this repo as a new site and deploy. `netlify.toml` al
 publish directory to the repo root with no build command, plus caching and security headers.
 Locally, just open `index.html` (or serve the folder with any static host).
 Tap **Add to Home Screen** for a full-screen app feel. Sound needs a first tap to unlock.
+On Android the system back gesture is trapped while the game is open, so an edge swipe mid-game
+can't close the app (use the home gesture to leave).
 
 - Use **only the hand the screen tells you to** (the HUD bar and hand icon change colour: 🔵 left, 🩷 right).
 - Each round lasts 4–6 seconds. In the second half, every game card shows the other hand's score to beat.

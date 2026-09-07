@@ -653,11 +653,11 @@ GAMES.push({
 GAMES.push({
   id: 'bee', name: 'BEE LINE', emoji: '🐝', verb: 'DRAG!', gesture: 'drag', hint: 'Hold and DRAG the bee along the path!', dur: 5.5, bg: '#fff3b0', unit: 'flowers', max: 8,
   start() {
-    const a = pa(); this.a = a; this.x0 = a.x + 50; this.x1 = a.x + a.w - 50; this.cy = a.y + a.h / 2 + 10; this.amp = a.h * 0.3; this.ph = R(TAU); this.fr = R(1.2, 1.7); this.hw = 40;
+    const a = pa(); this.a = a; this.x0 = a.x + 50; this.x1 = a.x + a.w - 50; this.cy = a.y + a.h / 2 + 10; this.amp = a.h * 0.3; this.ph = R(TAU); this.fr = R(1.2, 1.7); this.hw = 48;
     this.pts = []; for (let x = this.x0; x <= this.x1; x += 6) this.pts.push({ x, y: this.py(x) });
     this.flowers = []; for (let i = 0; i < 6; i++) { const x = lerp(this.x0 + 70, this.x1 - 70, i / 5); this.flowers.push({ x, y: this.py(x), got: false, col: pick(['#ff8ac2', '#c79cff', '#7ed6ff', '#ff9d6b']) }); }
     this.dirL = S.hand === 'L'; if (this.dirL) { /* left hand starts on the right, sweeps left */ }
-    this.bee = null; this.n = 0; this.stun = 0; this.t = 0; this.honey = false;
+    this.bee = null; this.n = 0; this.stun = 0; this.t = 0; this.honey = false; this.trail = [];
   },
   py(x) { return this.cy + Math.sin((x - this.x0) / (this.x1 - this.x0) * TAU * this.fr + this.ph) * this.amp; },
   startX() { return this.dirL ? this.x1 : this.x0; },
@@ -665,25 +665,35 @@ GAMES.push({
   update(dt) { this.t += dt; this.stun = Math.max(0, this.stun - dt); },
   inside(p) { return p.x >= this.x0 - 30 && p.x <= this.x1 + 30 && Math.abs(p.y - this.py(clamp(p.x, this.x0, this.x1))) <= this.hw; },
   touch(p) {
-    this.bee = { x: p.x, y: p.y };
-    if (!this.inside(p)) { if (this.stun <= 0) { this.stun = 0.5; AU.bad(); shake(0.15); FX.text(p.x, p.y - 40, 'bonk!', '#c9c9d9', 22); } return; }
+    const prev = this.bee; this.bee = { x: p.x, y: p.y }; const ok = this.inside(p);
+    this.trail.push({ x: p.x, y: p.y, ok, brk: !prev }); if (this.trail.length > 400) this.trail.shift();
+    if (!ok) { if (this.stun <= 0) { this.stun = 0.35; AU.bad(); shake(0.15); FX.text(p.x, p.y - 40, 'bonk!', '#c9c9d9', 22); } return; }
     if (this.stun > 0) return;
-    for (const f of this.flowers) if (!f.got && dist(p.x, p.y, f.x, f.y) < 34) { f.got = true; this.n++; AU.good(); FX.spark(f.x, f.y, f.col, 10); FX.text(f.x, f.y - 40, '+1', '#fff'); }
-    if (!this.honey && dist(p.x, p.y, this.endX(), this.py(this.endX())) < 40 && this.flowers.every(f => f.got)) { this.honey = true; this.n += 2; this.done = true; this.doneAt = S.t; AU.great(); FX.confetti(50); FX.spark(p.x, p.y, '#ffd23f', 20); FX.text(p.x, p.y - 50, 'HONEY! +2', '#ffd23f', 34); }
+    // catch flowers along the whole finger movement, not just at sampled points
+    const near = (x, y, r) => prev ? segDist(x, y, prev.x, prev.y, p.x, p.y) < r : dist(p.x, p.y, x, y) < r;
+    for (const f of this.flowers) if (!f.got && near(f.x, f.y, 42)) { f.got = true; this.n++; AU.good(); FX.spark(f.x, f.y, f.col, 10); FX.text(f.x, f.y - 40, '+1', '#fff'); }
+    if (!this.honey && near(this.endX(), this.py(this.endX()), 48) && this.flowers.every(f => f.got)) { this.honey = true; this.n += 2; this.done = true; this.doneAt = S.t; AU.great(); FX.confetti(50); FX.spark(p.x, p.y, '#ffd23f', 20); FX.text(p.x, p.y - 50, 'HONEY! +2', '#ffd23f', 34); }
   },
-  down(p) { this.touch(p); }, move(p) { this.touch(p); }, up() {},
+  down(p) { this.bee = null; this.touch(p); }, move(p) { this.touch(p); }, up() { this.bee = null; },
   draw() {
     ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.strokeStyle = '#c9f0a8'; ctx.lineWidth = this.hw * 2; ctx.beginPath(); this.pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.setLineDash([10, 12]); ctx.stroke(); ctx.setLineDash([]);
+    // the path the bee actually flew: honey-gold where on the path, grey where it strayed
+    if (this.trail.length > 1) {
+      ctx.lineWidth = 9; ctx.globalAlpha = 0.85;
+      for (let i = 1; i < this.trail.length; i++) { const a = this.trail[i - 1], b = this.trail[i]; if (b.brk) continue; ctx.strokeStyle = b.ok && a.ok ? '#ffb020' : 'rgba(120,120,130,0.5)'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+    }
     ctx.restore();
     // honey pot at the end, start marker
     const ex = this.endX(), sx = this.startX();
     txt('🍯', ex, this.py(ex), 56); txt('START', sx, this.py(sx) - 46, 16, { color: INK, stroke: '#fff', strokeW: 4 });
     for (const f of this.flowers) {
-      ctx.save(); ctx.translate(f.x, f.y); if (f.got) { ctx.globalAlpha = 0.35; ctx.scale(0.7, 0.7); }
+      ctx.save(); ctx.translate(f.x, f.y); if (f.got) { ctx.globalAlpha = 0.45; ctx.scale(0.7, 0.7); }
       ctx.fillStyle = f.col; ctx.strokeStyle = INK; ctx.lineWidth = 2.5; for (let i = 0; i < 6; i++) { circle(Math.cos(i / 6 * TAU + this.t) * 14, Math.sin(i / 6 * TAU + this.t) * 14, 9); ctx.fill(); ctx.stroke(); }
-      circle(0, 0, 11); ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.stroke(); face(0, 0, 9, 'happy'); ctx.restore();
+      circle(0, 0, 11); ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.stroke(); face(0, 0, 9, f.got ? 'joy' : 'happy'); ctx.restore();
+      if (f.got) { circle(f.x + 16, f.y - 16, 11); ctx.fillStyle = '#6fcf5a'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = INK; ctx.stroke(); txt('✓', f.x + 16, f.y - 15, 14, { color: '#fff', stroke: INK, strokeW: 2 }); }
     }
     // bee
     const b = this.bee || { x: sx, y: this.py(sx) }; const hover = Math.sin(this.t * 10) * 3;
@@ -1192,8 +1202,25 @@ function loop(now) {
 requestAnimationFrame(loop);
 if (document.fonts && document.fonts.load) document.fonts.load('700 20px Fredoka').catch(() => {});
 // expose for testing / tinkering
+// Keep the Android system back gesture (and browser back) from closing the game.
+// A dummy history entry is kept on the stack; every "back" pops it and we push it
+// straight back, so the app never navigates away. Skipped on iOS, where a pushed
+// entry would enable the edge-swipe animation we are trying to avoid.
+const BackTrap = {
+  armed: false,
+  init() {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/i.test(ua);
+    const standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+    if (!(isAndroid || (standalone && !isIOS))) return;
+    try { history.pushState({ ham: 1 }, '', location.href); this.armed = true; } catch (_) { return; }
+    window.addEventListener('popstate', () => { if (this.armed) { try { history.pushState({ ham: 1 }, '', location.href); } catch (_) {} } });
+  },
+};
+BackTrap.init();
 NET.load();
-window.HAM = { S, GAMES, Metro, AU, NET, startSession, askName, gestureDemo };
+window.HAM = { S, GAMES, Metro, AU, NET, BackTrap, startSession, askName, gestureDemo };
 </script>
 </body>
 </html>
