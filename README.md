@@ -11,6 +11,32 @@ crowns the **CHAMPION HAND**. 👑
 A full session (12 rounds) runs in **under 2 minutes**, with a metronome ticking under
 everything and a beat-synced 3‑2‑1 count before each game. The tempo speeds up every round.
 
+## Names & world records
+
+The game asks for the player's name up front (kept in `localStorage`, tap **Hi NAME! ✏️** on the
+title screen to change it). Every finished round is sent to a global leaderboard: per game, the
+top 10 scores in the world, with the hand that set them. A round that beats the world's best
+gets a **🌍 NEW WORLD RECORD!** and beating your own best gets a **⭐ personal best**.
+**🌍 WORLD RECORDS** on the title screen shows the record holder for every game, and tapping a
+game shows its top 10 (plus a running "lefties hold X · righties hold Y" tally).
+
+Syncing is asynchronous and lossless: scores go into a `localStorage` outbox the instant a round
+ends, then flush in the background with retry and exponential backoff. If the phone is offline
+or the tab is closed, the outbox survives reloads, a `sendBeacon` fires on page hide, and
+client-generated ids make every send idempotent (the server does `ON CONFLICT DO NOTHING`), so
+retries never double count and nothing is lost.
+
+### Backend: Netlify DB + Netlify Functions
+
+- `netlify/functions/scores.mjs` serves `GET/POST /api/scores` using `@netlify/database`.
+- `netlify/database/migrations/0001_create_scores/migration.sql` creates the `scores` table;
+  Netlify applies migrations automatically on deploy (the function also runs a
+  `CREATE TABLE IF NOT EXISTS` fallback so a fresh database never errors).
+- Netlify provisions the database automatically on the first deploy; deploy previews get their
+  own isolated database branch, so preview leaderboards don't mix with production.
+- Run `npm test` for the function's unit tests. For local dev with a real database use
+  `netlify dev` (which starts a local Postgres) instead of a plain static server.
+
 ## Play it
 
 Hosted on Netlify: connect this repo as a new site and deploy. `netlify.toml` already sets the
@@ -39,7 +65,8 @@ Tap **Add to Home Screen** for a full-screen app feel. Sound needs a first tap t
 ## Tech
 
 Single self-contained `index.html`: vanilla JS, a 2D canvas, Web Audio for the metronome,
-count-ins and all sound effects (no assets, no build step, no dependencies).
+count-ins and all sound effects (no assets, no build step). The only dependency is
+`@netlify/database` for the high-score function.
 `manifest.webmanifest` + `icon.svg` make it installable.
 
 Tweakables live at the top of the script: `GAMES_PER_SESSION`, per-game `dur`, and `bpmFor()`.

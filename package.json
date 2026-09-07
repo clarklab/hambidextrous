@@ -1,0 +1,13 @@
+{
+  "name": "hambidextrous",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Go HAM with both hands! Kawaii two-handed mini-game trainer.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@netlify/database": "^2.0.1"
+  }
+}
