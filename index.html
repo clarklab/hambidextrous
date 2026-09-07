@@ -74,6 +74,7 @@ const INK = '#2b1d2e';
 const PAL = ['#ff8ac2', '#7ed6ff', '#ffd23f', '#9ef29e', '#c79cff', '#ff9d6b'];
 const HAND_COL = { L: '#5fb8ff', R: '#ff7cc0' };
 const HAND_NAME = { L: 'LEFT', R: 'RIGHT' };
+const COUNT_IN = 5;            // beats counted down before every round (5-4-3-2-1-GO)
 const GAMES_PER_SESSION = 6;   // 6 games x 2 hands keeps a session under 2 minutes
 let TOP = 0, BOT = 0, HUD = 104;   // safe-area insets + HUD height (recomputed on resize)
 
@@ -156,6 +157,56 @@ function badge(x, y, w, h, col, label, size = 22) {
   ctx.save(); rr(x - w / 2, y - h / 2, w, h, h / 2); ctx.fillStyle = col; ctx.fill();
   ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
   txt(label, x, y + 1, size, { color: '#fff', stroke: INK, strokeW: size * 0.22 }); ctx.restore();
+}
+// pointing hand (index finger up, other fingers curled); fingertip is at (x - 0.33*s, y - 0.95*s)
+function finger(x, y, s, press = 0, col = '#ffd9b3') {
+  ctx.save(); ctx.translate(x, y + press * s * 0.12); ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(3, s * 0.1); ctx.strokeStyle = INK; ctx.fillStyle = col;
+  const shapes = [
+    () => rr(-s * 0.53, -s * 0.95, s * 0.4, s * 1.25, s * 0.2),                       // index finger, pointing up
+    () => rr(-s * 0.6, s * 0.02, s * 1.2, s * 0.85, s * 0.32),                        // palm
+    () => rr(-s * 0.12, -s * 0.2, s * 0.3, s * 0.5, s * 0.15),                         // curled middle
+    () => rr(s * 0.16, -s * 0.14, s * 0.28, s * 0.46, s * 0.14),                       // curled ring
+    () => rr(s * 0.4, -s * 0.04, s * 0.24, s * 0.38, s * 0.12),                        // curled pinky
+    () => { ctx.save(); ctx.translate(-s * 0.55, s * 0.3); ctx.rotate(0.6); rr(-s * 0.15, -s * 0.38, s * 0.3, s * 0.5, s * 0.15); ctx.restore(); }, // thumb
+  ];
+  for (const f of shapes) { f(); ctx.stroke(); } for (const f of shapes) { f(); ctx.fill(); }
+  ctx.strokeStyle = 'rgba(43,29,46,0.25)'; ctx.lineWidth = Math.max(2, s * 0.05); // knuckle creases
+  for (const kx of [0.03, 0.3, 0.52]) { ctx.beginPath(); ctx.moveTo(kx * s - s * 0.08, s * 0.12); ctx.lineTo(kx * s + s * 0.06, s * 0.12); ctx.stroke(); }
+  ctx.fillStyle = '#ffb3c6'; rr(-s * 0.44, -s * 0.89, s * 0.22, s * 0.2, s * 0.09); ctx.fill();
+  ctx.restore();
+}
+const GCOL = { tap: '#ff5c8a', tapfast: '#ff9d6b', swipe: '#5fb8ff', trace: '#c79cff', drag: '#6fcf5a', rub: '#ffb020' };
+// animated "how to touch" demo, centred on (x, y)
+function gestureDemo(kind, x, y, t, s = 60, alpha = 1) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const tip = (px, py, press) => finger(px + s * 0.33, py + s * 0.95, s, press);
+  const ripple = (px, py, k) => { ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; for (let i = 0; i < 2; i++) { const r = (k + i * 0.5) % 1; ctx.globalAlpha = alpha * (1 - r); ctx.beginPath(); ctx.arc(px, py, 6 + r * s * 0.8, 0, TAU); ctx.stroke(); } ctx.restore(); };
+  if (kind === 'tap' || kind === 'tapfast') {
+    const f = kind === 'tap' ? 1.5 : 5, ph = (t * f) % 1, press = ph < 0.3;
+    if (press) ripple(x, y, 0.2 + ph / 0.3 * 0.5); tip(x, y - (press ? 0 : s * 0.3), press ? 1 : 0);
+    if (kind === 'tapfast') txt('×3!', x + s * 0.85, y - s * 0.7, s * 0.4, { color: '#ffd23f', stroke: INK, rot: 0.15 });
+  } else if (kind === 'swipe') {
+    const ph = (t * 1.1) % 1, k = easeOut(ph), x0 = x - s, y0 = y + s * 0.5, x1 = x + s, y1 = y - s * 0.5, px = lerp(x0, x1, k), py = lerp(y0, y1, k);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(lerp(x0, x1, Math.max(0, k - 0.45)), lerp(y0, y1, Math.max(0, k - 0.45))); ctx.lineTo(px, py); ctx.stroke();
+    tip(px, py, 1);
+  } else if (kind === 'trace') {
+    const w = s * 1.7, h = s * 1.1, per = 2 * (w + h), d = ((t * 0.4) % 1) * per;
+    ctx.setLineDash([6, 8]); ctx.strokeStyle = '#ff5c8a'; ctx.lineWidth = 4; ctx.strokeRect(x - w / 2, y - h / 2, w, h); ctx.setLineDash([]);
+    let px, py; if (d < w) { px = x - w / 2 + d; py = y - h / 2; } else if (d < w + h) { px = x + w / 2; py = y - h / 2 + d - w; } else if (d < 2 * w + h) { px = x + w / 2 - (d - w - h); py = y + h / 2; } else { px = x - w / 2; py = y + h / 2 - (d - 2 * w - h); }
+    tip(px + s * 0.1, py + s * 0.1, 1);
+  } else if (kind === 'drag') {
+    const ph = (t * 0.7) % 1, k = easeOut(clamp(ph / 0.7, 0, 1)), x0 = x - s * 0.9, x1 = x + s * 0.9, px = lerp(x0, x1, k);
+    ctx.setLineDash([6, 8]); ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x1, y, s * 0.42, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#ff8ac2'; ctx.strokeStyle = INK; ctx.lineWidth = 3; circle(px, y, s * 0.28); ctx.fill(); ctx.stroke();
+    tip(px, y - s * 0.05, 1);
+  } else if (kind === 'rub') {
+    const px = x + Math.sin(t * 7) * s * 0.75;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x - s * 0.9, y + s * 0.6); ctx.lineTo(x + s * 0.9, y + s * 0.6); ctx.stroke();
+    txt('◀', x - s * 1.1, y + s * 0.6, s * 0.32, { color: '#fff', stroke: INK }); txt('▶', x + s * 1.1, y + s * 0.6, s * 0.32, { color: '#fff', stroke: INK });
+    tip(px, y, 1);
+  }
+  ctx.restore();
 }
 let shakeT = 0;
 function shake(a = 0.25) { shakeT = Math.max(shakeT, a); }
@@ -264,7 +315,7 @@ const GAMES = [];
 
 // 1. COIN TOSS — tap the flying coins
 GAMES.push({
-  id: 'coin', name: 'COIN TOSS', emoji: '🪙', hint: 'Tap the flying coins!', dur: 5, bg: '#fff0b3', unit: 'coins', max: 10,
+  id: 'coin', name: 'COIN TOSS', emoji: '🪙', verb: 'TAP!', gesture: 'tap', hint: 'TAP the flying coins!', dur: 5, bg: '#fff0b3', unit: 'coins', max: 10,
   start() { this.coins = []; this.n = 0; this.spawn = 0.1; this.t = 0; },
   update(dt) {
     this.t += dt; this.spawn -= dt; const a = pa();
@@ -306,7 +357,7 @@ GAMES.push({
 
 // 2. DART BOARD — the board runs away, tap to throw
 GAMES.push({
-  id: 'dart', name: 'DIZZY DARTS', emoji: '🎯', hint: 'Tap the moving bullseye!', dur: 5, bg: '#d6f2ff', unit: 'pts', max: 150,
+  id: 'dart', name: 'DIZZY DARTS', emoji: '🎯', verb: 'TAP!', gesture: 'tap', hint: 'TAP the moving bullseye!', dur: 5, bg: '#d6f2ff', unit: 'pts', max: 150,
   start() { this.t = 0; this.darts = []; this.score = 0; this.cool = 0; this.bx = W / 2; this.by = H / 2; this.mood = 'happy'; this.moodT = 0; },
   update(dt) {
     this.t += dt; this.cool -= dt; this.moodT -= dt; if (this.moodT <= 0) this.mood = 'happy';
@@ -348,7 +399,7 @@ GAMES.push({
 
 // 3. COUPON CUT — trace the dotted line
 GAMES.push({
-  id: 'coupon', name: 'COUPON CUT', emoji: '✂️', hint: 'Trace the dotted line to cut it out!', dur: 5.5, bg: '#ffe0ee', unit: '%', max: 100,
+  id: 'coupon', name: 'COUPON CUT', emoji: '✂️', verb: 'TRACE!', gesture: 'trace', hint: 'Hold and TRACE the dotted line!', dur: 5.5, bg: '#ffe0ee', unit: '%', max: 100,
   start() {
     const a = pa(); const w = Math.min(a.w - 80, 330), h = Math.min(a.h - 150, 250);
     this.r = { x: a.x + (a.w - w) / 2, y: a.y + (a.h - h) / 2 - 10, w, h };
@@ -361,6 +412,7 @@ GAMES.push({
   _cut(p) {
     let any = false; for (const q of this.pts) if (!q.cut && dist(p.x, p.y, q.x, q.y) < 30) { q.cut = true; this.cut++; any = true; if (Math.random() < 0.3) FX.spark(q.x, q.y, '#fff', 2, 90); }
     if (any && this.snipT <= 0) { AU.snip(); this.snipT = 0.09; }
+    if (this.cut >= this.pts.length && !this.done) { this.done = true; this.doneAt = S.t; AU.great(); FX.confetti(50); FX.spark(this.r.x + this.r.w / 2, this.r.y + this.r.h / 2, '#ffd23f', 20); FX.text(this.r.x + this.r.w / 2, this.r.y - 40, 'ALL CUT! ✂️', '#ffd23f', 36); }
   },
   down(p) { this.down_ = true; this.pos = p; this._cut(p); },
   move(p) { if (this.pos && this.down_) { const n = Math.ceil(dist(p.x, p.y, this.pos.x, this.pos.y) / 8); for (let i = 1; i <= n; i++) this._cut({ x: lerp(this.pos.x, p.x, i / n), y: lerp(this.pos.y, p.y, i / n) }); } this.pos = p; },
@@ -390,7 +442,7 @@ GAMES.push({
 
 // 4. WEED WHACK — whack-a-mole with sprouting weeds
 GAMES.push({
-  id: 'weed', name: 'WEED WHACK', emoji: '🌱', hint: 'Pull the weeds as they sprout!', dur: 5.5, bg: '#dcf5c8', unit: 'weeds', max: 12,
+  id: 'weed', name: 'WEED WHACK', emoji: '🌱', verb: 'TAP!', gesture: 'tap', hint: 'TAP the weeds as they sprout!', dur: 5.5, bg: '#dcf5c8', unit: 'weeds', max: 12,
   start() {
     const a = pa(); this.holes = []; const cols = 3, rows = 3; const cw = a.w / cols, ch = (a.h - 40) / rows;
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) this.holes.push({ x: a.x + cw * (c + 0.5), y: a.y + 40 + ch * (r + 0.5) + 20, weed: null });
@@ -432,7 +484,7 @@ GAMES.push({
 
 // 5. PANCAKE FLIP — timing! flip when golden
 GAMES.push({
-  id: 'pancake', name: 'PANCAKE FLIP', emoji: '🥞', hint: 'Tap when the pancake turns golden!', dur: 6, bg: '#ffe7c7', unit: 'flips', max: 4,
+  id: 'pancake', name: 'PANCAKE FLIP', emoji: '🥞', verb: 'TAP!', gesture: 'tap', hint: 'TAP when the pancake turns golden!', dur: 6, bg: '#ffe7c7', unit: 'flips', max: 4,
   start() { this.stack = 0; this.t = 0; this.msg = ''; this.msgT = 0; this.smoke = 0; this.newCake(); },
   newCake() { this.cook = 0; this.speed = R(0.5, 0.85); this.state = 'cook'; this.ft = 0; this.good = false; },
   update(dt) {
@@ -484,7 +536,7 @@ function mixCol(a, b, t) { t = clamp(t, 0, 1); const pa_ = a.match(/\w\w/g).map(
 
 // 6. SUSHI SLICE — swipe through the flying sushi
 GAMES.push({
-  id: 'sushi', name: 'SUSHI SLICE', emoji: '🍣', hint: 'Swipe to slice the sushi!', dur: 5, bg: '#e3f9ee', unit: 'sushi', max: 10,
+  id: 'sushi', name: 'SUSHI SLICE', emoji: '🍣', verb: 'SWIPE!', gesture: 'swipe', hint: 'SWIPE across the sushi to slice it!', dur: 5, bg: '#e3f9ee', unit: 'sushi', max: 10,
   start() { this.items = []; this.n = 0; this.spawn = 0.2; this.trail = []; this.prev = null; this.t = 0; },
   update(dt) {
     this.t += dt; this.spawn -= dt; const a = pa();
@@ -527,7 +579,7 @@ GAMES.push({
 
 // 7. PET THE CAT — rub back and forth
 GAMES.push({
-  id: 'cat', name: 'PET THE CAT', emoji: '🐱', hint: 'Rub the kitty back and forth!', dur: 5, bg: '#f1e6ff', unit: 'pets', max: 24,
+  id: 'cat', name: 'PET THE CAT', emoji: '🐱', verb: 'RUB!', gesture: 'rub', hint: 'RUB the kitty side to side!', dur: 5, bg: '#f1e6ff', unit: 'pets', max: 24,
   start() { this.n = 0; this.on = false; this.last = null; this.acc = 0; this.happy = 0; this.t = 0; this.purrT = 0; },
   update(dt) { this.t += dt; this.happy = Math.max(0, this.happy - dt * 0.25); this.purrT -= dt; },
   inCat(p) { const a = pa(); return dist(p.x, p.y, a.x + a.w / 2, a.y + a.h * 0.55) < 170; },
@@ -570,7 +622,7 @@ GAMES.push({
 
 // 8. BALLOON PUMP — mash to inflate
 GAMES.push({
-  id: 'balloon', name: 'BALLOON PUMP', emoji: '🎈', hint: 'Tap tap tap to pump it up!', dur: 4, bg: '#ffd9e2', unit: 'pumps', max: 32,
+  id: 'balloon', name: 'BALLOON PUMP', emoji: '🎈', verb: 'TAP FAST!', gesture: 'tapfast', hint: 'TAP TAP TAP as fast as you can!', dur: 4, bg: '#ffd9e2', unit: 'pumps', max: 32,
   start() { this.n = 0; this.vis = 0; this.pumpT = 0; this.t = 0; this.col = pick(PAL); },
   update(dt) { this.t += dt; this.vis = lerp(this.vis, this.n, Math.min(1, dt * 12)); this.pumpT = Math.max(0, this.pumpT - dt * 5); },
   down(p) { this.n++; this.pumpT = 1; AU.pump(this.n); FX.spark(p.x, p.y, '#fff', 4, 120); if (this.n === this.max) { AU.great(); FX.text(W / 2, H / 2, 'MAXIMUM!', '#ffd23f', 40); FX.confetti(40); } },
@@ -599,7 +651,7 @@ GAMES.push({
 
 // 9. BEE LINE — drag the bee along the wiggly path to the honey
 GAMES.push({
-  id: 'bee', name: 'BEE LINE', emoji: '🐝', hint: 'Drag the bee along the path to the honey!', dur: 5.5, bg: '#fff3b0', unit: 'flowers', max: 8,
+  id: 'bee', name: 'BEE LINE', emoji: '🐝', verb: 'DRAG!', gesture: 'drag', hint: 'Hold and DRAG the bee along the path!', dur: 5.5, bg: '#fff3b0', unit: 'flowers', max: 8,
   start() {
     const a = pa(); this.a = a; this.x0 = a.x + 50; this.x1 = a.x + a.w - 50; this.cy = a.y + a.h / 2 + 10; this.amp = a.h * 0.3; this.ph = R(TAU); this.fr = R(1.2, 1.7); this.hw = 40;
     this.pts = []; for (let x = this.x0; x <= this.x1; x += 6) this.pts.push({ x, y: this.py(x) });
@@ -617,7 +669,7 @@ GAMES.push({
     if (!this.inside(p)) { if (this.stun <= 0) { this.stun = 0.5; AU.bad(); shake(0.15); FX.text(p.x, p.y - 40, 'bonk!', '#c9c9d9', 22); } return; }
     if (this.stun > 0) return;
     for (const f of this.flowers) if (!f.got && dist(p.x, p.y, f.x, f.y) < 34) { f.got = true; this.n++; AU.good(); FX.spark(f.x, f.y, f.col, 10); FX.text(f.x, f.y - 40, '+1', '#fff'); }
-    if (!this.honey && dist(p.x, p.y, this.endX(), this.py(this.endX())) < 40 && this.flowers.every(f => f.got)) { this.honey = true; this.n += 2; AU.great(); FX.spark(p.x, p.y, '#ffd23f', 20); FX.text(p.x, p.y - 50, 'HONEY! +2', '#ffd23f', 34); }
+    if (!this.honey && dist(p.x, p.y, this.endX(), this.py(this.endX())) < 40 && this.flowers.every(f => f.got)) { this.honey = true; this.n += 2; this.done = true; this.doneAt = S.t; AU.great(); FX.confetti(50); FX.spark(p.x, p.y, '#ffd23f', 20); FX.text(p.x, p.y - 50, 'HONEY! +2', '#ffd23f', 34); }
   },
   down(p) { this.touch(p); }, move(p) { this.touch(p); }, up() {},
   draw() {
@@ -651,7 +703,7 @@ GAMES.push({
 
 // 10. CANDY SORT — drag candies into the matching jar
 GAMES.push({
-  id: 'candy', name: 'CANDY SORT', emoji: '🍬', hint: 'Drag each candy into the same-color jar!', dur: 5.5, bg: '#e0f7fa', unit: 'candies', max: 9,
+  id: 'candy', name: 'CANDY SORT', emoji: '🍬', verb: 'DRAG!', gesture: 'drag', hint: 'DRAG each candy into the matching jar!', dur: 5.5, bg: '#e0f7fa', unit: 'candies', max: 9,
   start() {
     const a = pa(); const jw = Math.min(130, a.w * 0.34), jh = 130;
     this.jars = [{ x: a.x + a.w * 0.27, y: a.y + a.h - jh / 2 - 10, w: jw, h: jh, col: '#ff8ac2', n: 0, wob: 0 }, { x: a.x + a.w * 0.73, y: a.y + a.h - jh / 2 - 10, w: jw, h: jh, col: '#7ed6ff', n: 0, wob: 0 }];
@@ -771,7 +823,7 @@ window.addEventListener('online', () => { NET.backoff = 1500; NET.flush(); NET.r
 const S = {
   state: 'title', t: 0, beat: 0,
   games: [], gi: 0, half: 0, hand: 'L', firstHand: 'L', game: null,
-  scores: {}, results: [], cd: null, goT: 0, buttons: [], stateT: 0, tally: null, lastRound: null, titleT: 0, revealed: 0, champShown: false, rec: null, rows: [], viewGame: null,
+  scores: {}, results: [], cd: null, goT: 0, buttons: [], stateT: 0, tally: null, lastRound: null, titleT: 0, revealed: 0, champShown: false, rec: null, rows: [], viewGame: null, hintT: 0, gotIt: false, nudge: null,
 };
 function setState(s) { S.state = s; S.t = 0; S.beat = 0; }
 function curGame() { return S.games[S.gi]; }
@@ -793,7 +845,27 @@ function beginRound() {
 }
 // what the other hand scored on this game (second half only)
 function rivalScore() { return S.half === 1 ? (S.scores[S.game.id] || {})[otherHand(S.hand)] : null; }
-function beginPlay() { S.game.start(); S.goT = 0.6; setState('play'); }
+function beginPlay() { S.game.start(); S.game.done = false; S.goT = 0.6; S.hintT = 2.8; S.gotIt = false; S.nudge = null; G.down = false; G.lastNudge = -9; setState('play'); }
+// gesture watcher: is the player touching the way this game needs?
+const G = { down: false, sx: 0, sy: 0, px: 0, py: 0, moved: 0, t0: 0, warned: false, lastNudge: -9 };
+const TAPPY = k => k === 'tap' || k === 'tapfast';
+const NUDGE = { tap: 'just TAP it! 👆', tapfast: 'TAP TAP TAP — no dragging!', swipe: 'SWIPE across it! 👉', trace: 'hold & TRACE the line ✂️', drag: 'hold & DRAG it ✋', rub: 'RUB side to side ↔' };
+function nudge() {
+  if (S.t - G.lastNudge < 1.6) return; G.lastNudge = S.t;
+  S.nudge = { text: NUDGE[S.game.gesture], t: 1.5 }; S.gotIt = false; S.hintT = Math.max(S.hintT, 1.8);
+  AU.tone({ f: 330, f2: 260, dur: 0.15, type: 'triangle', vol: 0.15 });
+}
+function gestureDown(p) { G.down = true; G.sx = G.px = p.x; G.sy = G.py = p.y; G.moved = 0; G.t0 = S.t; G.warned = false; }
+function gestureMove(p) {
+  if (!G.down) return; G.moved += dist(p.x, p.y, G.px, G.py); G.px = p.x; G.py = p.y; const k = S.game.gesture;
+  if (TAPPY(k)) { if (G.moved > 45 && !G.warned) { G.warned = true; nudge(); } }
+  else if (G.moved > (k === 'rub' ? 60 : 40)) S.gotIt = true;
+}
+function gestureUp() {
+  if (!G.down) return; G.down = false; const k = S.game.gesture, isTap = G.moved < 14 && S.t - G.t0 < 0.35;
+  if (TAPPY(k)) { if (isTap) S.gotIt = true; }
+  else if (isTap) nudge();
+}
 function endPlay() {
   const res = S.game.result(); (S.scores[S.game.id] = S.scores[S.game.id] || {})[S.hand] = res; S.lastRound = res; S.game.up({ x: 0, y: 0 }); activeId = null;
   S.rec = NET.record(S.game, S.hand, res);   // queue the score for the world board (async, never blocks)
@@ -821,10 +893,8 @@ function champAt() { return REVEAL_START + S.results.length * REVEAL_STEP + 0.6;
 function onBeat() {
   S.beat++;
   if (S.state === 'countdown') {
-    if (S.beat === 1) { S.cd = 3; AU.count(3); }
-    else if (S.beat === 2) { S.cd = 2; AU.count(2); }
-    else if (S.beat === 3) { S.cd = 1; AU.count(1); }
-    else if (S.beat >= 4) { AU.count(0); beginPlay(); }
+    if (S.beat <= COUNT_IN) { S.cd = COUNT_IN + 1 - S.beat; AU.count(S.cd); }
+    else { AU.count(0); beginPlay(); }
   } else if (S.state === 'roundEnd') { if (S.beat >= 2) afterRoundEnd(); }
   else if (S.state === 'halftime') { if (S.beat === 2 || S.beat === 4) AU.pop(); else if (S.beat >= 7) beginRound(); }
 }
@@ -853,20 +923,20 @@ function onDown(p) {
     if (b.id === 'play') { AU.pop(); askName(''); }
     else if (b.id === 'records') { AU.pop(); NET.refresh(); S.viewGame = null; setState('records'); }
   }
-  else if (S.state === 'play') S.game.down(p);
+  else if (S.state === 'play') { gestureDown(p); S.game.down(p); }
   else if (S.state === 'final') { if (S.champShown && S.t > champAt() + 0.6 && b) { AU.pop(); if (b.id === 'records') { S.viewGame = null; setState('records'); } else goHome(); } }
   else if (S.state === 'records') {
     if (b && b.id === 'back') { AU.pop(); if (S.viewGame) { S.viewGame = null; S.t = 0; } else if (S.tally) goHome(); else setState('title'); return; }
     if (!S.viewGame) { const row = S.rows.find(r => Math.abs(p.y - r.y) < r.h / 2); if (row) { AU.pop(); S.viewGame = row.game; S.t = 0; } }
   }
 }
-function onMove(p) { if (S.state === 'play') S.game.move(p); }
-function onUp(p) { if (S.state === 'play') S.game.up(p); }
+function onMove(p) { if (S.state === 'play') { gestureMove(p); S.game.move(p); } }
+function onUp(p) { if (S.state === 'play') { gestureUp(); S.game.up(p); } }
 
 // ---------- update / draw ----------
 function update(dt) {
   S.t += dt; S.titleT += dt; FX.update(dt); shakeT = Math.max(0, shakeT - dt);
-  if (S.state === 'play') { S.goT -= dt; S.game.update(dt); if (S.t >= S.game.dur) endPlay(); }
+  if (S.state === 'play') { S.goT -= dt; S.hintT -= dt; if (S.nudge) S.nudge.t -= dt; S.game.update(dt); if (S.t >= S.game.dur || (S.game.done && S.t - S.game.doneAt > 0.8)) endPlay(); }
   if (S.state === 'final') {
     const n = S.results.length, k = Math.min(n, Math.floor((S.t - REVEAL_START) / REVEAL_STEP) + 1);
     while (S.revealed < k) { const r = S.results[S.revealed++]; if (r.winner === 'T') AU.pop(); else AU.good(); }
@@ -894,11 +964,12 @@ function drawHUD() {
   const res = g.result(); const s = 1 + pulse * 0.05;
   txt(String(res.value), W - 44, TOP + 42, 40 * s, { color: '#ffd23f', stroke: INK });
   // timer bar with the hand name inside it
-  const frac = clamp(1 - S.t / g.dur, 0, 1), bw = W - 48, by = HUD - 32, bh = 22; const urgent = frac < 0.3;
+  const frac = g.done ? 1 : clamp(1 - S.t / g.dur, 0, 1), bw = W - 48, by = HUD - 32, bh = 22; const urgent = frac < 0.3;
   ctx.fillStyle = 'rgba(0,0,0,0.12)'; rr(24, by, bw, bh, bh / 2); ctx.fill();
   ctx.fillStyle = urgent ? (pulse > 0.5 ? '#ff5c8a' : '#ff9d6b') : hc; rr(24, by, Math.max(bh, bw * frac), bh, bh / 2); ctx.fill();
   ctx.lineWidth = 3; ctx.strokeStyle = INK; rr(24, by, bw, bh, bh / 2); ctx.stroke();
   txt(HAND_NAME[S.hand] + ' HAND', 40, by + bh / 2 + 1, 14, { align: 'left', color: '#fff', stroke: INK, strokeW: 3.5 });
+  txt(g.verb, W - 40, by + bh / 2 + 1, 14, { align: 'right', color: GCOL[g.gesture], stroke: INK, strokeW: 3.5 });
   ctx.restore();
 }
 function drawHandGlow(side, a = 0.5) {
@@ -969,15 +1040,20 @@ function drawRecords() {
 
 function drawCountdown() {
   const g = S.game, hc = HAND_COL[S.hand]; drawBackground(g.bg); drawHandGlow(S.hand, 0.55);
-  const k = easeOutBack(S.t / 0.35), cx = W / 2; const cw = Math.min(W - 40, 360), ch = 250; const cy = H * 0.36;
+  const k = easeOutBack(S.t / 0.35), cx = W / 2; const cw = Math.min(W - 40, 360), ch = Math.min(300, H * 0.38); const cy = TOP + H * 0.06 + ch / 2;
   ctx.save(); ctx.translate(cx, cy); ctx.scale(k, k);
   rr(-cw / 2, -ch / 2 + 8, cw, ch, 30); ctx.fillStyle = INK; ctx.fill(); rr(-cw / 2, -ch / 2, cw, ch, 30); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke();
-  txt(g.emoji, 0, -ch / 2 + 62, 64, { rot: Math.sin(S.titleT * 6) * 0.15 });
-  txt(g.name, 0, -ch / 2 + 122, Math.min(34, cw * 0.09), { color: hc, stroke: INK });
-  wrapText(g.hint, 0, -ch / 2 + 160, cw - 40, 19, INK);
+  txt(g.emoji + '  ' + g.name, 0, -ch / 2 + 36, Math.min(28, cw * 0.075), { color: hc, stroke: INK });
+  // the MAINLINE: how you touch, big and animated
+  const gc = GCOL[g.gesture], dy = -ch / 2 + ch * 0.47;
+  gestureDemo(g.gesture, -cw * 0.24, dy, S.titleT, Math.min(48, cw * 0.14));
+  const vs = Math.min(44, cw * 0.12 * (g.verb.length > 5 ? 0.62 : 1)); const pw = Math.min(cw * 0.46, 190), vp = 1 + Metro.pulse() * 0.08;
+  ctx.save(); ctx.translate(cw * 0.22, dy); ctx.scale(vp, vp); rr(-pw / 2, -30, pw, 60, 30); ctx.fillStyle = gc; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  txt(g.verb, 0, 1, vs, { color: '#fff', stroke: INK, strokeW: vs * 0.2 }); ctx.restore();
+  wrapText(g.hint, 0, ch / 2 - 62, cw - 40, 16, INK);
   const rv = rivalScore();
-  if (rv) txt(HAND_NAME[otherHand(S.hand)] + ' got ' + rv.label + ' — beat it!', 0, ch / 2 - 28, 15, { color: HAND_COL[otherHand(S.hand)], weight: 700 });
-  else txt('Game ' + (S.gi + 1) + ' of ' + S.games.length, 0, ch / 2 - 28, 15, { color: INK, weight: 500, alpha: 0.7 });
+  if (rv) txt(HAND_NAME[otherHand(S.hand)] + ' got ' + rv.label + ' — beat it!', 0, ch / 2 - 22, 14, { color: HAND_COL[otherHand(S.hand)], weight: 700 });
+  else txt('Game ' + (S.gi + 1) + ' of ' + S.games.length, 0, ch / 2 - 22, 14, { color: INK, weight: 500, alpha: 0.7 });
   ctx.restore();
   // hand call
   const hy = H * 0.66; const pulse = Metro.pulse(); const hs = 1 + pulse * 0.12;
@@ -999,8 +1075,21 @@ function drawPlay() {
   ctx.save(); if (shakeT > 0) ctx.translate(R(-1, 1) * shakeT * 24, R(-1, 1) * shakeT * 24);
   g.draw(); FX.draw(); ctx.restore();
   drawHUD();
+  const gc = GCOL[g.gesture], a = pa();
+  if (S.hintT > 0 && !S.gotIt) {
+    const al = clamp(S.hintT / 0.4, 0, 1), pulse = 1 + Metro.pulse() * 0.1;
+    txt(g.verb, W / 2, a.y + 58, Math.min(56, W * 0.14) * pulse, { color: gc, stroke: INK, alpha: al, rot: Math.sin(S.titleT * 6) * 0.04 });
+    gestureDemo(g.gesture, W / 2, a.y + a.h * 0.46, S.titleT, Math.min(64, W * 0.16), 0.92 * al);
+  }
   if (S.goT > 0) { const k = S.goT > 0.4 ? easeOutBack((0.6 - S.goT) / 0.2) : S.goT / 0.4; txt('GO!', W / 2, H / 2, 110 * k, { color: HAND_COL[S.hand], stroke: INK, rot: -0.1 }); }
-  if (S.t < 1.6) { txt(g.hint, W / 2, H - 46, 20, { color: '#fff', stroke: INK, alpha: clamp(1.6 - S.t, 0, 1) }); }
+  if (S.t < 2.2) { txt(g.hint, W / 2, H - 46 - BOT, 19, { color: '#fff', stroke: INK, alpha: clamp(2.2 - S.t, 0, 1) }); }
+  if (S.nudge && S.nudge.t > 0) {
+    const k = easeOutBack((1.5 - S.nudge.t) / 0.25), al = clamp(S.nudge.t / 0.3, 0, 1); ctx.save(); ctx.globalAlpha = al;
+    ctx.translate(W / 2, a.y + 118); ctx.scale(k, k); ctx.rotate(Math.sin(S.titleT * 18) * 0.03);
+    ctx.font = `700 19px ${FONT}`; const tw = ctx.measureText(S.nudge.text).width + 44;
+    rr(-tw / 2, -22, tw, 44, 22); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = gc; ctx.stroke();
+    txt(S.nudge.text, 0, 1, 19, { color: INK }); ctx.restore();
+  }
 }
 function drawRoundEnd() {
   const g = S.game; drawBackground(g.bg); ctx.save(); ctx.globalAlpha = 0.5; g.draw(); ctx.restore(); FX.draw(); drawHUD();
@@ -1104,7 +1193,7 @@ requestAnimationFrame(loop);
 if (document.fonts && document.fonts.load) document.fonts.load('700 20px Fredoka').catch(() => {});
 // expose for testing / tinkering
 NET.load();
-window.HAM = { S, GAMES, Metro, AU, NET, startSession, askName };
+window.HAM = { S, GAMES, Metro, AU, NET, startSession, askName, gestureDemo };
 </script>
 </body>
 </html>
