@@ -1048,7 +1048,8 @@ function drawFinal() {
     hand(cx + gap, hy + Math.cos(S.titleT * 12) * 3, hs * 0.85, 'R', 'o', HAND_COL.R, -Math.sin(S.titleT * 14) * 0.05);
     txt('VS', cx, hy, 30, { color: '#ffd23f', stroke: INK });
   } else {
-    const head = (NET.name ? NET.name.toUpperCase() + (/S$/i.test(NET.name) ? "' " : "'S ") : '') + (t.champ === 'T' ? 'BOTH HANDS WIN!' : 'CHAMPION HAND!');
+    const nm = NET.name.toUpperCase();
+    const head = t.champ === 'T' ? (nm ? 'BOTH HANDS WIN, ' + nm + '!' : 'BOTH HANDS WIN!') : (nm ? nm + (/S$/.test(nm) ? "' " : "'S ") : '') + 'CHAMPION HAND!';
     txt(head, cx, TOP + H * 0.055, Math.min(32, W * 0.078, (W - 30) / head.length * 1.85), { color: '#fff', stroke: INK });
     if (t.champ === 'T') { hand(cx - 70, hy, hs * 0.8 * k, 'L', 'joy', HAND_COL.L, Math.sin(S.titleT * 8) * 0.15); hand(cx + 70, hy, hs * 0.8 * k, 'R', 'joy', HAND_COL.R, -Math.sin(S.titleT * 8) * 0.15); txt('🤝', cx, hy - hs * 1.3, 50); }
     else { hand(cx, hy - bounce, hs * k, t.champ, 'joy', HAND_COL[t.champ], Math.sin(S.titleT * 8) * 0.15); txt('👑', cx, hy - hs * 1.45 - bounce, 56 * k, { rot: Math.sin(S.titleT * 5) * 0.15 }); }
