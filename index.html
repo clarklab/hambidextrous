@@ -906,7 +906,7 @@ function onBeat() {
     if (S.beat <= COUNT_IN) { S.cd = COUNT_IN + 1 - S.beat; AU.count(S.cd); }
     else { AU.count(0); beginPlay(); }
   } else if (S.state === 'roundEnd') { if (S.beat >= 2) afterRoundEnd(); }
-  else if (S.state === 'halftime') { if (S.beat === 2 || S.beat === 4) AU.pop(); else if (S.beat >= 7) beginRound(); }
+  else if (S.state === 'halftime') { if (S.beat === 2 || S.beat === 4) AU.pop(); }
 }
 
 // ---------- input ----------
@@ -935,6 +935,7 @@ function onDown(p) {
   }
   else if (S.state === 'play') { gestureDown(p); S.game.down(p); }
   else if (S.state === 'final') { if (S.champShown && S.t > champAt() + 0.6 && b) { AU.pop(); if (b.id === 'records') { S.viewGame = null; setState('records'); } else goHome(); } }
+  else if (S.state === 'halftime') { if (S.t > 0.6 && b && b.id === 'go') { AU.great(); beginRound(); } }
   else if (S.state === 'records') {
     if (b && b.id === 'back') { AU.pop(); if (S.viewGame) { S.viewGame = null; S.t = 0; } else if (S.tally) goHome(); else setState('title'); return; }
     if (!S.viewGame) { const row = S.rows.find(r => Math.abs(p.y - r.y) < r.h / 2); if (row) { AU.pop(); S.viewGame = row.game; S.t = 0; } }
@@ -1130,7 +1131,9 @@ function drawHalftime() {
   const bs = 1 + Metro.pulse() * 0.1;
   txt('SWITCH TO YOUR', cx, H * 0.66, Math.min(24, W * 0.06), { color: '#fff', stroke: INK });
   txt(HAND_NAME[to] + ' HAND!', cx, H * 0.66 + 52, Math.min(46, W * 0.11) * bs, { color: HAND_COL[to], stroke: INK });
-  txt('same ' + S.games.length + ' games · beat ' + HAND_NAME[from] + '\'s scores!', cx, H * 0.84, 17, { color: INK, weight: 500, alpha: 0.75 });
+  txt('same ' + S.games.length + ' games · beat ' + HAND_NAME[from] + '\'s scores!', cx, H * 0.66 + 92, 16, { color: INK, weight: 500, alpha: 0.75 });
+  S.buttons = [];
+  if (S.t > 0.6) bigButton(cx, H * 0.9 - BOT, Math.min(280, W * 0.76), 72, HAND_NAME[to] + ' HAND READY? TAP!', HAND_COL[to], 'go');
   FX.draw();
 }
 function drawFinal() {
