@@ -678,49 +678,51 @@ GAMES.push({
    ===================================================================== */
 const S = {
   state: 'title', t: 0, beat: 0,
-  games: [], gi: 0, hand: 'L', game: null,
-  cur: {}, results: [], cd: null, goT: 0, buttons: [], stateT: 0, tally: null, lastRound: null, titleT: 0,
+  games: [], gi: 0, half: 0, hand: 'L', firstHand: 'L', game: null,
+  scores: {}, results: [], cd: null, goT: 0, buttons: [], stateT: 0, tally: null, lastRound: null, titleT: 0, revealed: 0, champShown: false,
 };
 function setState(s) { S.state = s; S.t = 0; S.beat = 0; }
 function curGame() { return S.games[S.gi]; }
-function bpmFor(gi) { return 132 + gi * 6; }
+function otherHand(h) { return h === 'L' ? 'R' : 'L'; }
+function roundIndex() { return S.half * S.games.length + S.gi; }
+function bpmFor(ri) { return 130 + ri * 3; }
 
 function startSession(ids) {
   S.games = ids ? ids.map(id => GAMES.find(g => g.id === id)) : shuffle(GAMES).slice(0, GAMES_PER_SESSION);
   S.startedAt = performance.now();
-  S.gi = 0; S.results = []; S.cur = {}; S.tally = null;
-  S.hand = 'L'; FX.list.length = 0;
+  S.gi = 0; S.half = 0; S.results = []; S.scores = {}; S.tally = null;
+  S.firstHand = Math.random() < 0.5 ? 'L' : 'R'; S.hand = S.firstHand; FX.list.length = 0;
   Metro.start(bpmFor(0));
   beginRound();
 }
 function beginRound() {
-  S.game = curGame(); S.cd = null; Metro.bpm = bpmFor(S.gi); setState('countdown');
+  S.game = curGame(); S.cd = null; Metro.bpm = bpmFor(roundIndex()); setState('countdown');
 }
+// what the other hand scored on this game (second half only)
+function rivalScore() { return S.half === 1 ? (S.scores[S.game.id] || {})[otherHand(S.hand)] : null; }
 function beginPlay() { S.game.start(); S.goT = 0.6; setState('play'); }
 function endPlay() {
-  const res = S.game.result(); S.cur[S.hand] = res; S.lastRound = res; S.game.up({ x: 0, y: 0 }); activeId = null;
+  const res = S.game.result(); (S.scores[S.game.id] = S.scores[S.game.id] || {})[S.hand] = res; S.lastRound = res; S.game.up({ x: 0, y: 0 }); activeId = null;
   if (res.pct >= 0.8) AU.great(); else if (res.pct >= 0.4) AU.good(); else AU.bad();
   setState('roundEnd');
 }
 function afterRoundEnd() {
-  const first = S.gi % 2 === 0 ? 'L' : 'R', second = first === 'L' ? 'R' : 'L';
-  if (S.hand === first) { S.hand = second; beginRound(); }
-  else {
-    const L = S.cur.L, Rr = S.cur.R; const winner = L.value > Rr.value ? 'L' : Rr.value > L.value ? 'R' : 'T';
-    S.results.push({ game: S.game, L, R: Rr, winner }); setState('vs');
-  }
-}
-function nextGame() {
-  S.gi++; S.cur = {};
-  if (S.gi >= S.games.length) { finishSession(); return; }
-  S.hand = S.gi % 2 === 0 ? 'L' : 'R'; beginRound();
+  S.gi++;
+  if (S.gi < S.games.length) { beginRound(); return; }
+  if (S.half === 0) { S.half = 1; S.gi = 0; S.hand = otherHand(S.firstHand); AU.jingle(true); setState('halftime'); return; }
+  finishSession();
 }
 function finishSession() {
+  S.results = S.games.map(g => { const L = S.scores[g.id].L, Rr = S.scores[g.id].R; return { game: g, L, R: Rr, winner: L.value > Rr.value ? 'L' : Rr.value > L.value ? 'R' : 'T' }; });
   let wl = 0, wr = 0, pl = 0, pr = 0;
   for (const r of S.results) { if (r.winner === 'L') wl++; else if (r.winner === 'R') wr++; pl += r.L.pct; pr += r.R.pct; }
   let champ = wl > wr ? 'L' : wr > wl ? 'R' : pl > pr + 0.001 ? 'L' : pr > pl + 0.001 ? 'R' : 'T';
-  S.tally = { wl, wr, champ, secs: (performance.now() - S.startedAt) / 1000 }; Metro.stop(); AU.fanfare(); FX.confetti(140); setState('final');
+  S.tally = { wl, wr, champ, secs: (performance.now() - S.startedAt) / 1000 }; S.revealed = 0; S.champShown = false;
+  Metro.stop(); setState('final');
 }
+// final-screen reveal timing: rows pop in one by one, then the champion
+const REVEAL_START = 0.7, REVEAL_STEP = 0.5;
+function champAt() { return REVEAL_START + S.results.length * REVEAL_STEP + 0.6; }
 
 function onBeat() {
   S.beat++;
@@ -730,11 +732,7 @@ function onBeat() {
     else if (S.beat === 3) { S.cd = 1; AU.count(1); }
     else if (S.beat >= 4) { AU.count(0); beginPlay(); }
   } else if (S.state === 'roundEnd') { if (S.beat >= 2) afterRoundEnd(); }
-  else if (S.state === 'vs') {
-    const r = S.results[S.results.length - 1];
-    if (S.beat === 1) AU.pop(); else if (S.beat === 2) AU.pop(); else if (S.beat === 3) { if (r.winner === 'T') AU.good(); else AU.jingle(true); FX.confetti(30); }
-    else if (S.beat >= 5) nextGame();
-  }
+  else if (S.state === 'halftime') { if (S.beat === 2 || S.beat === 4) AU.pop(); else if (S.beat >= 7) beginRound(); }
 }
 
 // ---------- input ----------
@@ -757,7 +755,7 @@ function hitButton(p) { return S.buttons.find(b => Math.abs(p.x - b.x) < b.w / 2
 function onDown(p) {
   if (S.state === 'title') { if (S.t > 0.4 && hitButton(p)) { AU.great(); startSession(); } }
   else if (S.state === 'play') S.game.down(p);
-  else if (S.state === 'final') { if (S.t > 1 && hitButton(p)) { AU.pop(); startSession(); } }
+  else if (S.state === 'final') { if (S.champShown && S.t > champAt() + 0.6 && hitButton(p)) { AU.pop(); startSession(); } }
 }
 function onMove(p) { if (S.state === 'play') S.game.move(p); }
 function onUp(p) { if (S.state === 'play') S.game.up(p); }
@@ -766,6 +764,11 @@ function onUp(p) { if (S.state === 'play') S.game.up(p); }
 function update(dt) {
   S.t += dt; S.titleT += dt; FX.update(dt); shakeT = Math.max(0, shakeT - dt);
   if (S.state === 'play') { S.goT -= dt; S.game.update(dt); if (S.t >= S.game.dur) endPlay(); }
+  if (S.state === 'final') {
+    const n = S.results.length, k = Math.min(n, Math.floor((S.t - REVEAL_START) / REVEAL_STEP) + 1);
+    while (S.revealed < k) { const r = S.results[S.revealed++]; if (r.winner === 'T') AU.pop(); else AU.good(); }
+    if (!S.champShown && S.t >= champAt()) { S.champShown = true; AU.fanfare(); FX.confetti(140); }
+  }
 }
 
 function drawBackground(col) {
@@ -820,8 +823,8 @@ function drawTitle() {
   hand(cx - Math.min(110, W * 0.25), H * 0.5, Math.min(90, W * 0.2), 'L', 'joy', HAND_COL.L, Math.sin(t * 6) * 0.15);
   hand(cx + Math.min(110, W * 0.25), H * 0.5, Math.min(90, W * 0.2), 'R', 'joy', HAND_COL.R, -Math.sin(t * 6 + 1) * 0.15);
   txt('VS', cx, H * 0.5, 34, { color: '#ffd23f', stroke: INK, rot: Math.sin(t * 3) * 0.2 });
-  txt('Every mini game is played TWICE:', cx, H * 0.66, Math.min(18, W * 0.046), { color: INK, weight: 500 });
-  txt('once with each hand. Which hand wins? 👑', cx, H * 0.66 + 26, Math.min(18, W * 0.046), { color: INK, weight: 500 });
+  txt('One hand plays all the games…', cx, H * 0.66, Math.min(18, W * 0.046), { color: INK, weight: 500 });
+  txt('then the other hand gets its turn. Who wins? 👑', cx, H * 0.66 + 26, Math.min(18, W * 0.046), { color: INK, weight: 500 });
   bigButton(cx, H * 0.8 - BOT * 0.5, Math.min(260, W * 0.7), 74, 'TAP TO PLAY', '#ff5c8a');
   txt(GAMES.length + ' mini games · under 2 minutes · both hands!', cx, H * 0.8 + 62, 14, { color: INK, weight: 500, alpha: 0.7 });
 }
@@ -834,8 +837,9 @@ function drawCountdown() {
   txt(g.emoji, 0, -ch / 2 + 62, 64, { rot: Math.sin(S.titleT * 6) * 0.15 });
   txt(g.name, 0, -ch / 2 + 122, Math.min(34, cw * 0.09), { color: hc, stroke: INK });
   wrapText(g.hint, 0, -ch / 2 + 160, cw - 40, 19, INK);
-  const first = S.gi % 2 === 0 ? 'L' : 'R';
-  txt(S.hand === first ? 'Game ' + (S.gi + 1) + ' of ' + S.games.length : 'now the other hand!', 0, ch / 2 - 28, 15, { color: INK, weight: 500, alpha: 0.7 });
+  const rv = rivalScore();
+  if (rv) txt(HAND_NAME[otherHand(S.hand)] + ' got ' + rv.label + ' — beat it!', 0, ch / 2 - 28, 15, { color: HAND_COL[otherHand(S.hand)], weight: 700 });
+  else txt('Game ' + (S.gi + 1) + ' of ' + S.games.length, 0, ch / 2 - 28, 15, { color: INK, weight: 500, alpha: 0.7 });
   ctx.restore();
   // hand call
   const hy = H * 0.66; const pulse = Metro.pulse(); const hs = 1 + pulse * 0.12;
@@ -867,51 +871,64 @@ function drawRoundEnd() {
   rr(-Math.min(W - 40, 340) / 2, -90, Math.min(W - 40, 340), 180, 30); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke();
   txt(HAND_NAME[S.hand] + ' HAND', 0, -50, 22, { color: hc, stroke: INK });
   txt(res.label, 0, 6, Math.min(44, W * 0.1), { color: '#ffd23f', stroke: INK });
-  txt(res.pct >= 0.8 ? 'AMAZING!!' : res.pct >= 0.5 ? 'nice!' : res.pct >= 0.25 ? 'not bad!' : 'oof, wobbly!', 0, 56, 22, { color: INK, weight: 500 });
+  const rv = rivalScore();
+  if (rv) { const d = res.value - rv.value; txt(d > 0 ? 'beat ' + HAND_NAME[otherHand(S.hand)] + '\'s ' + rv.value + '! 🎉' : d < 0 ? HAND_NAME[otherHand(S.hand)] + ' had ' + rv.value + '… 😅' : 'tied with ' + HAND_NAME[otherHand(S.hand)] + '! 🤝', 0, 56, 20, { color: d > 0 ? hc : INK, weight: 700 }); }
+  else txt(res.pct >= 0.8 ? 'AMAZING!!' : res.pct >= 0.5 ? 'nice!' : res.pct >= 0.25 ? 'not bad!' : 'oof, wobbly!', 0, 56, 22, { color: INK, weight: 500 });
   ctx.restore();
 }
-function drawVS() {
-  const r = S.results[S.results.length - 1]; drawBackground(r.game.bg);
-  if (S.beat >= 3 && r.winner !== 'T') drawHandGlow(r.winner, 0.5);
-  const cx = W / 2, cy = H * 0.42, gap = Math.min(110, W * 0.26);
-  txt(r.game.emoji + ' ' + r.game.name, cx, H * 0.14, Math.min(30, W * 0.07), { color: '#fff', stroke: INK });
-  for (const side of ['L', 'R']) {
-    const x = cx + (side === 'L' ? -gap : gap), res = r[side]; const shown = side === 'L' ? S.beat >= 1 : S.beat >= 2;
-    const won = S.beat >= 3 && r.winner === side, lost = S.beat >= 3 && r.winner !== side && r.winner !== 'T';
-    const bounce = won ? Math.abs(Math.sin(S.titleT * 8)) * 18 : 0;
-    hand(x, cy - bounce, Math.min(80, W * 0.18), side, won ? 'joy' : lost ? 'sad' : 'happy', HAND_COL[side], won ? Math.sin(S.titleT * 10) * 0.15 : 0);
-    if (won) txt('👑', x, cy - 100 - bounce, 48, { rot: Math.sin(S.titleT * 6) * 0.2 });
-    txt(HAND_NAME[side], x, cy + 80, 20, { color: HAND_COL[side], stroke: INK });
-    if (shown) { const k = easeOutBack(clamp((S.t - (side === 'L' ? 0 : 0.3)) / 0.3, 0, 1)); txt(res.label, x, cy + 116, Math.min(26, W * 0.058) * k, { color: '#ffd23f', stroke: INK }); }
-  }
-  txt('VS', cx, cy, 36, { color: '#ffd23f', stroke: INK, rot: Math.sin(S.titleT * 4) * 0.2 });
-  if (S.beat >= 3) { const k = easeOutBack((S.t - 0) / 0.3); txt(r.winner === 'T' ? "IT'S A TIE!" : HAND_NAME[r.winner] + ' HAND WINS!', cx, H * 0.74, Math.min(40, W * 0.09) * Math.min(1, k), { color: r.winner === 'T' ? '#fff' : HAND_COL[r.winner], stroke: INK }); }
-  // running tally
-  let wl = 0, wr = 0; for (const q of S.results) { if (q.winner === 'L') wl++; else if (q.winner === 'R') wr++; }
-  txt(`LEFT ${wl}  ·  ${wr} RIGHT`, cx, H * 0.86, 22, { color: '#fff', stroke: INK });
+function drawHalftime() {
+  const from = S.firstHand, to = S.hand; drawBackground('#fff3b0'); drawHandGlow(to, 0.45 + Metro.pulse() * 0.2);
+  const cx = W / 2, cy = H * 0.42, k = easeOutBack(S.t / 0.4);
+  txt('HALFTIME!', cx, TOP + H * 0.14, Math.min(48, W * 0.12) * k, { color: '#ffd23f', stroke: INK, rot: Math.sin(S.titleT * 4) * 0.06 });
+  txt(HAND_NAME[from] + ' hand is done. Shake it out!', cx, TOP + H * 0.14 + 46, Math.min(18, W * 0.046), { color: INK, weight: 500 });
+  // tired hand slumps off, fresh hand bounces in
+  const slide = easeOut(S.t / 0.8); const gap = Math.min(110, W * 0.26);
+  hand(cx - gap - slide * 40, cy + slide * 20, Math.min(80, W * 0.18) * (1 - slide * 0.3), from, 'sleepy', HAND_COL[from], slide * 0.4);
+  const bounce = Math.abs(Math.sin(S.titleT * 7)) * 20;
+  hand(cx + gap, cy - bounce, Math.min(96, W * 0.22) * k, to, 'joy', HAND_COL[to], Math.sin(S.titleT * 9) * 0.15);
+  txt('💤', cx - gap + 50, cy - 70 - slide * 10, 30);
+  txt('✨', cx + gap + 60, cy - 90 - bounce, 30);
+  const bs = 1 + Metro.pulse() * 0.1;
+  txt('SWITCH TO YOUR', cx, H * 0.66, Math.min(24, W * 0.06), { color: '#fff', stroke: INK });
+  txt(HAND_NAME[to] + ' HAND!', cx, H * 0.66 + 52, Math.min(46, W * 0.11) * bs, { color: HAND_COL[to], stroke: INK });
+  txt('same ' + S.games.length + ' games · beat ' + HAND_NAME[from] + '\'s scores!', cx, H * 0.84, 17, { color: INK, weight: 500, alpha: 0.75 });
   FX.draw();
 }
 function drawFinal() {
-  const t = S.tally; drawBackground(t.champ === 'T' ? '#fff3b0' : t.champ === 'L' ? '#d6ecff' : '#ffdcef'); S.buttons = [];
-  if (t.champ !== 'T') drawHandGlow(t.champ, 0.5);
-  const cx = W / 2; const k = easeOutBack(S.t / 0.5);
-  txt(t.champ === 'T' ? 'BOTH HANDS WIN!' : 'CHAMPION HAND!', cx, TOP + H * 0.055, Math.min(32, W * 0.078), { color: '#fff', stroke: INK });
+  const t = S.tally, done = S.champShown; S.buttons = [];
+  drawBackground(!done ? '#fff3b0' : t.champ === 'T' ? '#fff3b0' : t.champ === 'L' ? '#d6ecff' : '#ffdcef');
+  if (done && t.champ !== 'T') drawHandGlow(t.champ, 0.5);
+  const cx = W / 2; const k = easeOutBack((S.t - champAt()) / 0.5);
   const hy = TOP + H * 0.27; const bounce = Math.abs(Math.sin(S.titleT * 6)) * 12; const hs = Math.min(84, H * 0.1);
-  if (t.champ === 'T') { hand(cx - 70, hy, hs * 0.8 * k, 'L', 'joy', HAND_COL.L, Math.sin(S.titleT * 8) * 0.15); hand(cx + 70, hy, hs * 0.8 * k, 'R', 'joy', HAND_COL.R, -Math.sin(S.titleT * 8) * 0.15); txt('🤝', cx, hy - hs * 1.3, 50); }
-  else { hand(cx, hy - bounce, hs * k, t.champ, 'joy', HAND_COL[t.champ], Math.sin(S.titleT * 8) * 0.15); txt('👑', cx, hy - hs * 1.45 - bounce, 56 * k, { rot: Math.sin(S.titleT * 5) * 0.15 }); }
-  txt(t.champ === 'T' ? `${t.wl} – ${t.wr}  perfectly even!` : `${HAND_NAME[t.champ]} HAND  ${Math.max(t.wl, t.wr)} – ${Math.min(t.wl, t.wr)}`, cx, TOP + H * 0.375, Math.min(30, W * 0.07), { color: t.champ === 'T' ? INK : HAND_COL[t.champ], stroke: t.champ === 'T' ? '#fff' : INK });
-  // results list
+  if (!done) {
+    txt('THE RESULTS!', cx, TOP + H * 0.055, Math.min(32, W * 0.078), { color: '#fff', stroke: INK });
+    // both hands waiting nervously
+    const gap = Math.min(90, W * 0.22);
+    hand(cx - gap, hy + Math.sin(S.titleT * 12) * 3, hs * 0.85, 'L', 'o', HAND_COL.L, Math.sin(S.titleT * 14) * 0.05);
+    hand(cx + gap, hy + Math.cos(S.titleT * 12) * 3, hs * 0.85, 'R', 'o', HAND_COL.R, -Math.sin(S.titleT * 14) * 0.05);
+    txt('VS', cx, hy, 30, { color: '#ffd23f', stroke: INK });
+  } else {
+    txt(t.champ === 'T' ? 'BOTH HANDS WIN!' : 'CHAMPION HAND!', cx, TOP + H * 0.055, Math.min(32, W * 0.078), { color: '#fff', stroke: INK });
+    if (t.champ === 'T') { hand(cx - 70, hy, hs * 0.8 * k, 'L', 'joy', HAND_COL.L, Math.sin(S.titleT * 8) * 0.15); hand(cx + 70, hy, hs * 0.8 * k, 'R', 'joy', HAND_COL.R, -Math.sin(S.titleT * 8) * 0.15); txt('🤝', cx, hy - hs * 1.3, 50); }
+    else { hand(cx, hy - bounce, hs * k, t.champ, 'joy', HAND_COL[t.champ], Math.sin(S.titleT * 8) * 0.15); txt('👑', cx, hy - hs * 1.45 - bounce, 56 * k, { rot: Math.sin(S.titleT * 5) * 0.15 }); }
+  }
+  // running tally (counts up as rows reveal)
+  let wl = 0, wr = 0; for (let i = 0; i < S.revealed; i++) { const w = S.results[i].winner; if (w === 'L') wl++; else if (w === 'R') wr++; }
+  if (done) txt(t.champ === 'T' ? `${t.wl} – ${t.wr}  perfectly even!` : `${HAND_NAME[t.champ]} HAND  ${Math.max(t.wl, t.wr)} – ${Math.min(t.wl, t.wr)}`, cx, TOP + H * 0.375, Math.min(30, W * 0.07), { color: t.champ === 'T' ? INK : HAND_COL[t.champ], stroke: t.champ === 'T' ? '#fff' : INK });
+  else txt(`LEFT ${wl}  ·  ${wr} RIGHT`, cx, TOP + H * 0.375, Math.min(26, W * 0.065), { color: '#fff', stroke: INK });
+  // results list, one row per game, revealed one at a time
   const lw = Math.min(W - 30, 380), ly = TOP + H * 0.42, rh = Math.min(38, (H * 0.36) / S.results.length);
   ctx.save(); rr(cx - lw / 2, ly, lw, rh * S.results.length + 16, 22); ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
   S.results.forEach((r, i) => {
-    const y = ly + 8 + rh * i + rh / 2; const show = S.t > 0.4 + i * 0.12; if (!show) return;
-    txt(r.game.emoji, cx - lw / 2 + 28, y, 22); txt(r.game.name, cx - lw / 2 + 50, y, 15, { align: 'left', color: INK });
-    txt(String(r.L.value), cx + lw / 2 - 110, y, 20, { color: HAND_COL.L, stroke: INK, strokeW: 4, weight: 700 });
-    txt(String(r.R.value), cx + lw / 2 - 30, y, 20, { color: HAND_COL.R, stroke: INK, strokeW: 4 });
-    txt(r.winner === 'T' ? '🤝' : '👑', cx + lw / 2 - (r.winner === 'L' ? 140 : r.winner === 'R' ? 60 : 70), y, 16);
+    const y = ly + 8 + rh * i + rh / 2; if (i >= S.revealed) return;
+    const rk = easeOutBack((S.t - REVEAL_START - i * REVEAL_STEP) / 0.3);
+    txt(r.game.emoji, cx - lw / 2 + 28, y, 22 * rk); txt(r.game.name, cx - lw / 2 + 50, y, 15, { align: 'left', color: INK });
+    txt(String(r.L.value), cx + lw / 2 - 110, y, 20 * rk, { color: HAND_COL.L, stroke: INK, strokeW: 4, weight: 700 });
+    txt(String(r.R.value), cx + lw / 2 - 30, y, 20 * rk, { color: HAND_COL.R, stroke: INK, strokeW: 4 });
+    txt(r.winner === 'T' ? '🤝' : '👑', cx + lw / 2 - (r.winner === 'L' ? 140 : r.winner === 'R' ? 60 : 70), y, 16 * rk);
   });
   ctx.restore();
-  bigButton(cx, H * 0.9 - BOT, Math.min(260, W * 0.7), 66, 'PLAY AGAIN', '#ff5c8a');
+  if (done) bigButton(cx, H * 0.9 - BOT, Math.min(260, W * 0.7), 66, 'PLAY AGAIN', '#ff5c8a');
   FX.draw();
 }
 
@@ -922,7 +939,7 @@ function draw() {
     case 'countdown': drawCountdown(); FX.draw(); break;
     case 'play': drawPlay(); break;
     case 'roundEnd': drawRoundEnd(); break;
-    case 'vs': drawVS(); break;
+    case 'halftime': drawHalftime(); break;
     case 'final': drawFinal(); break;
   }
   ctx.restore();
