@@ -411,6 +411,7 @@ GAMES.push({
   _cut(p) {
     let any = false; for (const q of this.pts) if (!q.cut && dist(p.x, p.y, q.x, q.y) < 30) { q.cut = true; this.cut++; any = true; if (Math.random() < 0.3) FX.spark(q.x, q.y, '#fff', 2, 90); }
     if (any && this.snipT <= 0) { AU.snip(); this.snipT = 0.09; }
+    if (this.cut >= this.pts.length && !this.done) { this.done = true; this.doneAt = S.t; AU.great(); FX.confetti(50); FX.spark(this.r.x + this.r.w / 2, this.r.y + this.r.h / 2, '#ffd23f', 20); FX.text(this.r.x + this.r.w / 2, this.r.y - 40, 'ALL CUT! ✂️', '#ffd23f', 36); }
   },
   down(p) { this.down_ = true; this.pos = p; this._cut(p); },
   move(p) { if (this.pos && this.down_) { const n = Math.ceil(dist(p.x, p.y, this.pos.x, this.pos.y) / 8); for (let i = 1; i <= n; i++) this._cut({ x: lerp(this.pos.x, p.x, i / n), y: lerp(this.pos.y, p.y, i / n) }); } this.pos = p; },
@@ -667,7 +668,7 @@ GAMES.push({
     if (!this.inside(p)) { if (this.stun <= 0) { this.stun = 0.5; AU.bad(); shake(0.15); FX.text(p.x, p.y - 40, 'bonk!', '#c9c9d9', 22); } return; }
     if (this.stun > 0) return;
     for (const f of this.flowers) if (!f.got && dist(p.x, p.y, f.x, f.y) < 34) { f.got = true; this.n++; AU.good(); FX.spark(f.x, f.y, f.col, 10); FX.text(f.x, f.y - 40, '+1', '#fff'); }
-    if (!this.honey && dist(p.x, p.y, this.endX(), this.py(this.endX())) < 40 && this.flowers.every(f => f.got)) { this.honey = true; this.n += 2; AU.great(); FX.spark(p.x, p.y, '#ffd23f', 20); FX.text(p.x, p.y - 50, 'HONEY! +2', '#ffd23f', 34); }
+    if (!this.honey && dist(p.x, p.y, this.endX(), this.py(this.endX())) < 40 && this.flowers.every(f => f.got)) { this.honey = true; this.n += 2; this.done = true; this.doneAt = S.t; AU.great(); FX.confetti(50); FX.spark(p.x, p.y, '#ffd23f', 20); FX.text(p.x, p.y - 50, 'HONEY! +2', '#ffd23f', 34); }
   },
   down(p) { this.touch(p); }, move(p) { this.touch(p); }, up() {},
   draw() {
@@ -843,7 +844,7 @@ function beginRound() {
 }
 // what the other hand scored on this game (second half only)
 function rivalScore() { return S.half === 1 ? (S.scores[S.game.id] || {})[otherHand(S.hand)] : null; }
-function beginPlay() { S.game.start(); S.goT = 0.6; S.hintT = 2.8; S.gotIt = false; S.nudge = null; G.down = false; G.lastNudge = -9; setState('play'); }
+function beginPlay() { S.game.start(); S.game.done = false; S.goT = 0.6; S.hintT = 2.8; S.gotIt = false; S.nudge = null; G.down = false; G.lastNudge = -9; setState('play'); }
 // gesture watcher: is the player touching the way this game needs?
 const G = { down: false, sx: 0, sy: 0, px: 0, py: 0, moved: 0, t0: 0, warned: false, lastNudge: -9 };
 const TAPPY = k => k === 'tap' || k === 'tapfast';
@@ -936,7 +937,7 @@ function onUp(p) { if (S.state === 'play') { gestureUp(); S.game.up(p); } }
 // ---------- update / draw ----------
 function update(dt) {
   S.t += dt; S.titleT += dt; FX.update(dt); shakeT = Math.max(0, shakeT - dt);
-  if (S.state === 'play') { S.goT -= dt; S.hintT -= dt; if (S.nudge) S.nudge.t -= dt; S.game.update(dt); if (S.t >= S.game.dur) endPlay(); }
+  if (S.state === 'play') { S.goT -= dt; S.hintT -= dt; if (S.nudge) S.nudge.t -= dt; S.game.update(dt); if (S.t >= S.game.dur || (S.game.done && S.t - S.game.doneAt > 0.8)) endPlay(); }
   if (S.state === 'final') {
     const n = S.results.length, k = Math.min(n, Math.floor((S.t - REVEAL_START) / REVEAL_STEP) + 1);
     while (S.revealed < k) { const r = S.results[S.revealed++]; if (r.winner === 'T') AU.pop(); else AU.good(); }
@@ -964,7 +965,7 @@ function drawHUD() {
   const res = g.result(); const s = 1 + pulse * 0.05;
   txt(String(res.value), W - 44, TOP + 42, 40 * s, { color: '#ffd23f', stroke: INK });
   // timer bar with the hand name inside it
-  const frac = clamp(1 - S.t / g.dur, 0, 1), bw = W - 48, by = HUD - 32, bh = 22; const urgent = frac < 0.3;
+  const frac = g.done ? 1 : clamp(1 - S.t / g.dur, 0, 1), bw = W - 48, by = HUD - 32, bh = 22; const urgent = frac < 0.3;
   ctx.fillStyle = 'rgba(0,0,0,0.12)'; rr(24, by, bw, bh, bh / 2); ctx.fill();
   ctx.fillStyle = urgent ? (pulse > 0.5 ? '#ff5c8a' : '#ff9d6b') : hc; rr(24, by, Math.max(bh, bw * frac), bh, bh / 2); ctx.fill();
   ctx.lineWidth = 3; ctx.strokeStyle = INK; rr(24, by, bw, bh, bh / 2); ctx.stroke();
